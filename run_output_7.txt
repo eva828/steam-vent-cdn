@@ -1,0 +1,109 @@
+   Compiling tmodloader-downloader v0.2.0 (C:\Users\eva828\Documents\Develop\tModLoader\SteamVentCdn)
+warning: unused import: `CPublishedFile_GetDetails_Request`
+  --> src\main.rs:37:5
+   |
+37 |     CPublishedFile_GetDetails_Request, PublishedFileDetails,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `futures_util::StreamExt`
+  --> src\main.rs:21:5
+   |
+21 | use futures_util::StreamExt;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: field `vhost` is never read
+  --> src\main.rs:68:5
+   |
+66 | struct ContentServer {
+   |        ------------- field in this struct
+67 |     host: String,
+68 |     vhost: String,
+   |     ^^^^^
+   |
+   = note: `ContentServer` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `get_cdn_auth_token` is never used
+   --> src\main.rs:274:14
+    |
+103 | impl WorkshopDownloader {
+    | ----------------------- method in this implementation
+...
+274 |     async fn get_cdn_auth_token(&self, app_id: u32, depot_id: u32, host: &str) -> Result<String> {
+    |              ^^^^^^^^^^^^^^^^^^
+
+warning: field `cb_compressed` is never read
+   --> src\main.rs:629:5
+    |
+625 | struct ChunkInfo {
+    |        --------- field in this struct
+...
+629 |     cb_compressed: u32,
+    |     ^^^^^^^^^^^^^
+    |
+    = note: `ChunkInfo` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: `tmodloader-downloader` (bin "tmodloader-downloader") generated 5 warnings (run `cargo fix --bin "tmodloader-downloader" -p tmodloader-downloader` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.80s
+     Running `target\debug\tmodloader-downloader.exe --published-file-id 2824688072 --verbose`
+Main started
+2026-02-14T05:30:26.512301Z  INFO tmodloader_downloader: tModLoader Workshop Downloader (SteamPipe CDN)
+2026-02-14T05:30:26.512386Z  INFO tmodloader_downloader: Output: ./mods
+2026-02-14T05:30:26.512397Z  INFO tmodloader_downloader: Items: 1
+2026-02-14T05:30:26.512407Z  INFO tmodloader_downloader: Discovering Steam servers...
+2026-02-14T05:30:26.513166Z DEBUG reqwest::connect: starting new connection: https://api.steampowered.com/
+2026-02-14T05:30:26.523920Z DEBUG hyper_util::client::legacy::connect::http: connecting to 23.36.106.129:443
+2026-02-14T05:30:26.527510Z DEBUG hyper_util::client::legacy::connect::http: connected to 23.36.106.129:443
+2026-02-14T05:30:26.795203Z DEBUG hyper_util::client::legacy::pool: pooling idle connection for ("https", api.steampowered.com)
+2026-02-14T05:30:26.795701Z  INFO tmodloader_downloader: Connecting anonymously to Steam...
+2026-02-14T05:30:26.795787Z DEBUG steam_vent::serverlist: picked websocket server from list addr="cmp1-fra2.steamserver.net:443"
+2026-02-14T05:30:27.071677Z DEBUG connect{addr="wss://cmp1-fra2.steamserver.net:443/cmsocket/"}: rustls::client::hs: No cached session for DnsName("cmp1-fra2.steamserver.net")
+2026-02-14T05:30:27.071828Z DEBUG connect{addr="wss://cmp1-fra2.steamserver.net:443/cmsocket/"}: rustls::client::hs: Not resuming any session
+2026-02-14T05:30:27.378821Z DEBUG connect{addr="wss://cmp1-fra2.steamserver.net:443/cmsocket/"}: rustls::client::hs: Using ciphersuite TLS13_AES_256_GCM_SHA384
+2026-02-14T05:30:27.378910Z DEBUG connect{addr="wss://cmp1-fra2.steamserver.net:443/cmsocket/"}: rustls::client::tls13: Not resuming
+2026-02-14T05:30:27.379870Z DEBUG connect{addr="wss://cmp1-fra2.steamserver.net:443/cmsocket/"}: rustls::client::tls13: TLS1.3 encrypted extensions: ServerExtensions { server_name_ack: (), unknown_extensions: {}, .. }
+2026-02-14T05:30:27.379911Z DEBUG connect{addr="wss://cmp1-fra2.steamserver.net:443/cmsocket/"}: rustls::client::hs: ALPN protocol is None
+2026-02-14T05:30:27.940357Z DEBUG connect{addr="wss://cmp1-fra2.steamserver.net:443/cmsocket/"}: tungstenite::handshake::client: Client handshake done.
+2026-02-14T05:30:27.940428Z DEBUG connect{addr="wss://cmp1-fra2.steamserver.net:443/cmsocket/"}: steam_vent::transport::websocket: connected to websocket server
+2026-02-14T05:30:27.940591Z DEBUG steam_vent::net: writing raw k_EMsgClientHello message
+2026-02-14T05:30:27.940826Z DEBUG steam_vent::net: writing raw k_EMsgClientLogon message
+2026-02-14T05:30:27.940913Z DEBUG steam_vent::session: waiting for login response
+2026-02-14T05:30:28.785725Z DEBUG steam_vent::message: Reading child message MsgKind(5501)
+2026-02-14T05:30:28.785767Z DEBUG steam_vent::connection::filter: processing message job_id=18446744073709551615 kind=MsgKind(5501)
+2026-02-14T05:30:28.785796Z DEBUG steam_vent::message: Reading child message MsgKind(751)
+2026-02-14T05:30:28.785806Z DEBUG steam_vent::connection::filter: processing message job_id=18446744073709551615 kind=MsgKind(751)
+2026-02-14T05:30:28.785891Z DEBUG steam_vent::session: session started steam_id=117093590311632896
+2026-02-14T05:30:28.785918Z DEBUG steam_vent::connection::raw: Setting up heartbeat with interval 9s
+2026-02-14T05:30:28.785948Z  INFO tmodloader_downloader: Connected to Steam anonymously.
+2026-02-14T05:30:28.786053Z  INFO tmodloader_downloader: Fetching CDN content servers...
+2026-02-14T05:30:28.786081Z DEBUG steam_vent::net: writing raw k_EMsgServiceMethodCallFromClient message
+2026-02-14T05:30:29.289086Z DEBUG steam_vent::message: Reading child message MsgKind(147)
+2026-02-14T05:30:29.289120Z DEBUG steam_vent::connection::filter: processing message job_id=1 kind=MsgKind(147)
+2026-02-14T05:30:29.289276Z  INFO tmodloader_downloader: Raw CDN servers response: 14 servers
+2026-02-14T05:30:29.289310Z  INFO tmodloader_downloader: Got 14 CDN servers
+2026-02-14T05:30:29.289344Z  INFO tmodloader_downloader: Requesting details for IDs: [2824688072] via Web API
+2026-02-14T05:30:29.290452Z DEBUG reqwest::connect: starting new connection: https://api.steampowered.com/
+2026-02-14T05:30:29.290969Z DEBUG hyper_util::client::legacy::connect::http: connecting to 23.36.106.129:443
+2026-02-14T05:30:29.294240Z DEBUG hyper_util::client::legacy::connect::http: connected to 23.36.106.129:443
+2026-02-14T05:30:29.461143Z DEBUG hyper_util::client::legacy::pool: pooling idle connection for ("https", api.steampowered.com)
+2026-02-14T05:30:29.461310Z  INFO tmodloader_downloader: Web API Raw Response: {"response":{"result":1,"resultcount":1,"publishedfiledetails":[{"publishedfileid":"2824688072","result":1,"creator":"76561198010743466","creator_app_id":1281930,"consumer_app_id":1281930,"filename":"","file_size":"303387040","file_url":"","hcontent_file":"8778387915552646669","preview_url":"https://images.steamusercontent.com/ugc/16287419144747502134/8159A1EAB947FEB7CB222CE4AC6075AD5020B25E/","hcontent_preview":"16287419144747502134","title":"Calamity Mod","description":"[h1]Calamity Mod[/h1]\n[url=https://discord.gg/calamity]Discord[/url] [url=https://calamitymod.wiki.gg]Official Wiki[/url]\n\nThe Calamity Mod is a vast content mod that creates a new and refreshing experience for Terraria!\n\nWith this mod comes a slew of new bosses, unique and challenging difficulty modes, over two thousand new items, new NPCs, and entire new biomes to explore! Calamity also massively expands the endgame of Terraria, creating an entirely original, intense experience for players to enjoy.\n\nThe mod additionally tweaks tons of vanilla features whilst adding new ones to aid the player's experience and heavily expand on the base game, including but not limited to:\n[olist]\n[*] Reworked reforging with the Goblin Tinkerer\n[*] Reworked gameplay progression in early Hardmode\n[*] Dozens of extra crafting recipes for existing vanilla items\n[*] Dozens more quality of life and balance changes!\n[/olist]\n\n[i]Please note that this mod [b]REQUIRES[/b] Calamity's soundtrack! You will need to download the music mod to be able to play![/i]\nhttps://steamcommunity.com/sharedfiles/filedetails/?id=2824688266\n\n[i]For even more Calamity music, subscribe to Vanilla Calamity Mod Music![/i]\nhttps://steamcommunity.com/sharedfiles/filedetails/?id=2816188633\n\n[b]Be sure to join our Discord server linked above to keep up with the latest news about upcoming updates and features.[/b]\n\n[hr]\n\nA more detailed breakdown of the content available in Calamity:\n[olist]\n[*] 27 bosses and 5 minibosses\n[*] 200+ enemies\n[*] 4 town NPCs\n[*] 5 biomes and many new structures\n[*] 1 event\n[*] 1 new playable class (based on Throwing from Terraria 1.3)\n[*] 2400+ items\n[*] 700+ weapons\n[*] Almost 100 blocks\n[*] 600+ pieces of furniture\n[*] 11 ores\n[*] 2 full difficulty settings above Expert which can be combined with Master\n[*] Significant improvements and changes to Master difficulty\n[*] 50+ changes to vanilla mechanics\n[*] 30+ new recipes for vanilla items\n[*] 500+ tweaks and improvements to vanilla items\n[*] Minor cross-mod support for the Thorium Mod\n[/olist]\n[quote=tModLoader CalamityMod]\nDeveloped By The Calamity Dev Team[/quote]","time_created":1655963256,"time_updated":1770786654,"visibility":0,"banned":0,"ban_reason":"","subscriptions":8689756,"favorited":209978,"lifetime_subscriptions":9124121,"lifetime_favorited":221699,"views":4064086,"tags":[{"tag":"new content"},{"tag":"Utilities"},{"tag":"Gameplay Tweaks"},{"tag":"Audio Tweaks"},{"tag":"Visual Tweaks"},{"tag":"Custom World Gen"},{"tag":"English"},{"tag":"Both"},{"tag":"1.4.3"},{"tag":"1.4.4"}]}]}}
+2026-02-14T05:30:29.461519Z  INFO tmodloader_downloader: Got 1 valid workshop items via Web API
+2026-02-14T05:30:29.461566Z  INFO tmodloader_downloader: Downloading: Unknown (id=2824688072, app_id=1281930, hcontent=8778387915552646669)
+2026-02-14T05:30:29.461579Z  INFO tmodloader_downloader: Getting manifest request code (depot=1281930, manifest=8778387915552646669)...
+2026-02-14T05:30:29.461604Z DEBUG steam_vent::net: writing raw k_EMsgServiceMethodCallFromClient message
+2026-02-14T05:30:29.934381Z DEBUG steam_vent::message: Reading child message MsgKind(147)
+2026-02-14T05:30:29.934420Z DEBUG steam_vent::connection::filter: processing message job_id=2 kind=MsgKind(147)
+2026-02-14T05:30:29.934505Z  INFO tmodloader_downloader: Manifest request code: 10159731766430235665
+2026-02-14T05:30:29.934528Z  INFO tmodloader_downloader: Getting depot decryption key...
+2026-02-14T05:30:29.934539Z DEBUG tmodloader_downloader: Requesting depot key for depot_id=1281930 app_id=1281930
+2026-02-14T05:30:29.934563Z DEBUG steam_vent::net: writing raw k_EMsgClientGetDepotDecryptionKey message
+2026-02-14T05:30:37.787914Z DEBUG steam_vent::connection::raw: Sending heartbeat message
+2026-02-14T05:30:37.787948Z DEBUG steam_vent::net: writing raw k_EMsgClientHeartBeat message
+2026-02-14T05:30:39.936102Z ERROR tmodloader_downloader: 笨・Failed to download 2824688072: GetDepotDecryptionKey failed: Response timed out
+
+=== Download Summary ===
+Total requested: 1
+Successfully downloaded: 0
+Failed: 1

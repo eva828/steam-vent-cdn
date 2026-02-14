@@ -1,0 +1,11 @@
+# Steam Workshop Downloader for tModLoader
+# 必要な依存関係
+
+# ValvePython/steam - Steam APIクライアント
+steam[client]>=1.4.4
+
+# 以下はsteamライブラリの依存関係として自動的にインストールされます:
+# - gevent
+# - requests
+# - cryptography
+# - pyyaml

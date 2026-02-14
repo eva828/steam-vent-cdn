@@ -1,0 +1,50 @@
+[package]
+name = "tmodloader-downloader"
+version = "0.2.0"
+edition = "2021"
+description = "Download tModLoader .tmod files from Steam Workshop via SteamPipe CDN (no API key)"
+license = "MIT"
+
+[dependencies]
+# Steam network protocol library
+steam-vent = "0.4"
+steam-vent-proto = "0.5"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP client for CDN
+reqwest = { version = "0.12", features = ["stream"] }
+
+# Error handling
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Async utilities
+futures-util = "0.3"
+
+# Command line
+clap = { version = "4", features = ["derive"] }
+
+# Crypto — AES decryption for depot chunks
+aes = "0.8"
+cbc = "0.1"
+
+# Hex encoding for chunk SHA
+hex = "0.4"
+
+# Zip decompression (manifest + chunks)
+zip = "2"
+
+# LZMA decompression (VZ chunks)
+lzma-rs = "0.3"
+
+# Bytes
+bytes = "1"
+
+# JSON for Web API
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

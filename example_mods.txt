@@ -1,0 +1,13 @@
+# tModLoader Mod List
+# One Published File ID per line
+# Lines starting with # are comments
+
+# Example: Calamity Mod (not actual ID - replace with real ones)
+2824688072
+
+# Example: Thorium Mod
+2909886416
+
+# Add your mod IDs below (find them in Steam Workshop URLs):
+# https://steamcommunity.com/sharedfiles/filedetails/?id=XXXXXXXX
+# The XXXXXXXX is the Published File ID
