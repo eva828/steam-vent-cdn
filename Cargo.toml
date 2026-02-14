@@ -32,9 +32,5 @@ aes = "0.8.3"
 cbc = "0.1.2"
 ecb = "0.1.2"
 base64 = "0.22.1"
-# steam-vent = "0.4.2"
-# steam-vent = { path = "steam-vent" }
-# steam-vent = { path = "steam-vent" }
-# steam-vent-proto = { path = "steam-vent/protobuf" }
-steam-vent = { path = "steam-vent-new" }
+steam-vent = { git = "https://codeberg.org/eva828/steam-vent.git", branch = "main" }
 steam-vent-proto = "0.5.2"
