@@ -1,0 +1,34 @@
+[package]
+name = "SteamVentCdn"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.101"
+byteorder = "1.5.0"
+clap = { version = "4.5.58", features = ["derive"] }
+crc = "3.4.0"
+env_logger = "0.11.9"
+hex = "0.4.3"
+indicatif = "0.18.3"
+log = "0.4.29"
+prost = "0.14.3"
+reqwest = { version = "0.13.2", features = [
+    "json",
+    "rustls",
+    "multipart",
+    "blocking",
+] }
+serde = { version = "1.0.218", features = ["derive"] }
+serde_json = "1.0.139"
+sha1 = "0.10.6"
+tokio = { version = "1.49.0", features = ["full"] }
+steam-vent = { path = "./steam-vent" }
+steam-vent-proto = { path = "./steam-vent/protobuf" }
+zip = "2.2.2"
+tokio-stream = "0.1.18"
+lzma-rs = "0.3.0"
+aes = "0.8.3"
+cbc = "0.1.2"
+ecb = "0.1.2"
+base64 = "0.22.1"

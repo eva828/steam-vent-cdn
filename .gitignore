@@ -1,4 +1,5 @@
-target/
+/target/
 .history/
 .env
-steamcmd_tool/
+/steamcmd_tool/
+/mods/
