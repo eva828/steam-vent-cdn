@@ -3,7 +3,6 @@ use clap::Parser;
 use std::path::PathBuf;
 
 mod downloader;
-mod protos;
 use downloader::TModDownloader;
 
 #[derive(Parser, Debug)]
@@ -30,7 +29,9 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
     let args = Args::parse();
     println!("Item ID: {}", args.item_id);
 

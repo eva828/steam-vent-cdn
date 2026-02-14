@@ -1,29 +1,30 @@
+use aes::Aes256;
+use aes::cipher::{BlockDecrypt, BlockDecryptMut, KeyInit, KeyIvInit, block_padding::Pkcs7};
 use anyhow::{Context, Result};
-use prost::Message;
+use base64::{Engine as _, engine::general_purpose};
+use cbc::Decryptor;
 use reqwest::Client as HttpClient;
 use std::fs;
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-
 use steam_vent::ConnectionTrait;
 use steam_vent::ServerList;
+use steam_vent::ServiceMethodRequest;
 use steam_vent::connection::Connection;
-use steam_vent_proto::steammessages_contentsystem_steamclient::{
-    CContentServerDirectory_GetManifestRequestCode_Request,
-    CContentServerDirectory_GetServersForSteamPipe_Request,
-};
-use steam_vent_proto::steammessages_publishedfile_steamclient::CPublishedFile_GetDetails_Request;
 
-use aes::Aes256;
-use aes::cipher::{BlockDecrypt, BlockDecryptMut, KeyInit, KeyIvInit, block_padding::Pkcs7};
-use base64::{Engine as _, engine::general_purpose};
-use cbc::Decryptor;
-
-use crate::protos::content_manifest::{ContentManifestMetadata, ContentManifestPayload};
+use steam_vent_proto::RpcMessage;
+use steam_vent_proto::content_manifest::{ContentManifestMetadata, ContentManifestPayload};
+use steam_vent_proto::protobuf::{self, Message};
 use steam_vent_proto::steammessages_clientserver_2::{
     CMsgClientGetDepotDecryptionKey, CMsgClientGetDepotDecryptionKeyResponse,
 };
+use steam_vent_proto::steammessages_contentsystem_steamclient::{
+    CContentServerDirectory_GetManifestRequestCode_Request,
+    CContentServerDirectory_GetManifestRequestCode_Response,
+    CContentServerDirectory_GetServersForSteamPipe_Request,
+};
+use steam_vent_proto::steammessages_publishedfile_steamclient::CPublishedFile_GetDetails_Request;
 
 pub struct TModDownloader {
     connection: Option<Connection>,
@@ -111,6 +112,7 @@ impl TModDownloader {
         code_req.set_app_id(app_id);
         code_req.set_depot_id(depot_id);
         code_req.set_manifest_id(manifest_id);
+        code_req.set_app_branch("public".into());
 
         let code_resp = conn.service_method(code_req).await?;
         let mrc = code_resp
@@ -172,7 +174,7 @@ impl TModDownloader {
                 final_payload.extend_from_slice(segment_data);
             } else if magic == 0x1F448235 || magic == 0x1F4812BE {
                 log::info!("Decoding Metadata segment...");
-                match ContentManifestMetadata::decode(Cursor::new(segment_data)) {
+                match ContentManifestMetadata::parse_from_bytes(segment_data) {
                     Ok(m) => {
                         log::info!(
                             "Metadata: Names encrypted: {:?}, Depot ID: {:?}",
@@ -197,7 +199,7 @@ impl TModDownloader {
             final_payload = payload_bytes;
         }
 
-        let mut manifest = ContentManifestPayload::decode(Cursor::new(final_payload))
+        let mut manifest = ContentManifestPayload::parse_from_bytes(&final_payload)
             .context("Failed to decode manifest Protobuf")?;
 
         if let Some(ref m) = metadata {

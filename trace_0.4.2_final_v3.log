@@ -1,0 +1,89 @@
+   Compiling steam-vent v0.4.2 (C:\Users\eva828\Documents\Develop\tModLoader\SteamVentCdn\steam-vent-new)
+   Compiling SteamVentCdn v0.1.0 (C:\Users\eva828\Documents\Develop\tModLoader\SteamVentCdn)
+warning: unused import: `steam_vent::ServiceMethodRequest`
+  --> src\downloader.rs:13:5
+   |
+13 | use steam_vent::ServiceMethodRequest;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `steam_vent_proto::RpcMessage`
+  --> src\downloader.rs:16:5
+   |
+16 | use steam_vent_proto::RpcMessage;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `self`
+  --> src\downloader.rs:18:34
+   |
+18 | use steam_vent_proto::protobuf::{self, Message};
+   |                                  ^^^^
+
+warning: unused import: `CContentServerDirectory_GetManifestRequestCode_Response`
+  --> src\downloader.rs:24:5
+   |
+24 |     CContentServerDirectory_GetManifestRequestCode_Response,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `SteamVentCdn` (bin "SteamVentCdn") generated 4 warnings (run `cargo fix --bin "SteamVentCdn" -p SteamVentCdn` to apply 4 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 24.79s
+     Running `target\debug\SteamVentCdn.exe --item-id 2824688072`
+Item ID: 2824688072
+2026-02-14T16:14:11.728089Z DEBUG steam_vent::serverlist: picked websocket server from list addr="cmp2-dfw2.steamserver.net:27018"
+2026-02-14T16:14:12.367029Z DEBUG connect{addr="wss://cmp2-dfw2.steamserver.net:27018/cmsocket/"}: steam_vent::transport::websocket: connected to websocket server
+2026-02-14T16:14:12.367326Z DEBUG steam_vent::net: writing raw k_EMsgClientHello message
+2026-02-14T16:14:12.367477Z TRACE steam_vent::net: writing header for k_EMsgClientHello protobuf message: NetMessageHeader { source_job_id: JobId(18446744073709551615), target_job_id: JobId(18446744073709551615), steam_id: SteamID(0) {ID: 0, Instance: {Type: All, Flags: None}, Type: Invalid, Universe: Invalid}, session_id: 0, target_job_name: None, result: None, source_app_id: None }
+2026-02-14T16:14:12.367579Z TRACE steam_vent::message: writing body of protobuf message k_EMsgClientHello
+2026-02-14T16:14:12.367606Z TRACE steam_vent::net: encoded body(4 bytes): [8, ac, 80, 4]
+2026-02-14T16:14:12.368336Z DEBUG steam_vent::net: writing raw k_EMsgClientLogon message
+2026-02-14T16:14:12.368474Z TRACE steam_vent::net: writing header for k_EMsgClientLogon protobuf message: NetMessageHeader { source_job_id: JobId(18446744073709551615), target_job_id: JobId(18446744073709551615), steam_id: SteamID(117093590311632896) {ID: 0, Instance: {Type: All, Flags: None}, Type: AnonUser, Universe: Public}, session_id: 0, target_job_name: None, result: None, source_app_id: None }
+2026-02-14T16:14:12.368544Z TRACE steam_vent::message: writing body of protobuf message k_EMsgClientLogon
+2026-02-14T16:14:12.368604Z TRACE steam_vent::net: encoded body(59 bytes): [8, ac, 80, 4, 28, ae, ce, b5, e8, 5, 32, 7, 65, 6e, 67, 6c, 69, 73, 68, 38, cb, 1, 5a, 5, d, 0, 0, 0, 0, 88, 2, 2, 92, 3, 9, 61, 6e, 6f, 6e, 79, 6d, 6f, 75, 73, 82, 5, 9, 61, 6e, 6f, 6e, 79, 6d, 6f, 75, 73, b0, 6, 1]
+2026-02-14T16:14:12.368895Z DEBUG steam_vent::session: waiting for login response
+2026-02-14T16:14:12.852880Z TRACE steam_vent::net: reading header for MsgKind(1) protobuf message
+2026-02-14T16:14:12.853091Z TRACE steam_vent::net: reading protobuf header of 0 bytes
+2026-02-14T16:14:12.853592Z TRACE steam_vent::net: reading header for MsgKind(5501) protobuf message
+2026-02-14T16:14:12.853629Z TRACE steam_vent::net: reading protobuf header of 20 bytes
+2026-02-14T16:14:12.853670Z DEBUG steam_vent::message: Reading child message MsgKind(5501)
+2026-02-14T16:14:12.853693Z DEBUG steam_vent::connection::filter: processing message job_id=18446744073709551615 kind=MsgKind(5501)
+2026-02-14T16:14:12.853752Z TRACE steam_vent::net: reading header for MsgKind(751) protobuf message
+2026-02-14T16:14:12.853766Z TRACE steam_vent::net: reading protobuf header of 20 bytes
+2026-02-14T16:14:12.853778Z DEBUG steam_vent::message: Reading child message MsgKind(751)
+2026-02-14T16:14:12.853788Z DEBUG steam_vent::connection::filter: processing message job_id=18446744073709551615 kind=MsgKind(751)
+2026-02-14T16:14:12.853858Z TRACE steam_vent::net: reading body of MsgKind(751) message(71 bytes)
+2026-02-14T16:14:12.853894Z TRACE steam_vent::message: reading body of protobuf message k_EMsgClientLogOnResponse
+2026-02-14T16:14:12.853984Z DEBUG steam_vent::session: session started steam_id=117093590311632896
+2026-02-14T16:14:12.854010Z DEBUG steam_vent::connection::raw: Setting up heartbeat with interval 9s
+2026-02-14T16:14:13.356608Z DEBUG steam_vent::net: writing raw k_EMsgServiceMethodCallFromClient message
+2026-02-14T16:14:13.356686Z TRACE steam_vent::net: writing header for k_EMsgServiceMethodCallFromClient protobuf message: NetMessageHeader { source_job_id: JobId(1), target_job_id: JobId(18446744073709551615), steam_id: SteamID(117093590311632896) {ID: 0, Instance: {Type: All, Flags: None}, Type: AnonUser, Universe: Public}, session_id: -238499736, target_job_name: Some("ContentServerDirectory.GetServersForSteamPipe#1"), result: None, source_app_id: None }
+2026-02-14T16:14:13.356736Z TRACE steam_vent::message: writing body of protobuf message k_EMsgServiceMethodCallFromClient
+2026-02-14T16:14:13.356758Z TRACE steam_vent::net: encoded body(4 bytes): [8, 0, 10, 5]
+2026-02-14T16:14:13.499046Z TRACE steam_vent::net: reading header for MsgKind(113) message
+2026-02-14T16:14:13.499141Z DEBUG steam_vent::connection::filter: processing message job_id=1 kind=MsgKind(113)
+2026-02-14T16:14:13.499212Z DEBUG steam_vent::connection: skipping unexpected message kind MsgKind(113) during service call
+2026-02-14T16:14:13.499296Z TRACE steam_vent::net: reading header for MsgKind(757) protobuf message
+2026-02-14T16:14:13.499320Z TRACE steam_vent::net: reading protobuf header of 11 bytes
+2026-02-14T16:14:13.499355Z DEBUG steam_vent::connection::filter: processing message job_id=18446744073709551615 kind=MsgKind(757)
+2026-02-14T16:14:13.500507Z ERROR steam_vent::connection::filter: Error while reading message error=InvalidHeader
+2026-02-14T16:14:21.856188Z DEBUG steam_vent::connection::raw: Sending heartbeat message
+2026-02-14T16:14:21.856224Z DEBUG steam_vent::net: writing raw k_EMsgClientHeartBeat message
+2026-02-14T16:14:21.856249Z TRACE steam_vent::net: writing header for k_EMsgClientHeartBeat protobuf message: NetMessageHeader { source_job_id: JobId(18446744073709551615), target_job_id: JobId(18446744073709551615), steam_id: SteamID(117093590311632896) {ID: 0, Instance: {Type: All, Flags: None}, Type: AnonUser, Universe: Public}, session_id: -238499736, target_job_name: None, result: None, source_app_id: None }
+2026-02-14T16:14:21.856290Z TRACE steam_vent::message: writing body of protobuf message k_EMsgClientHeartBeat
+2026-02-14T16:14:21.856302Z TRACE steam_vent::net: encoded body(0 bytes): []
+2026-02-14T16:14:21.856349Z ERROR steam_vent::connection::raw: Failed to send heartbeat message error=Ws(AlreadyClosed)
+2026-02-14T16:14:30.857660Z DEBUG steam_vent::connection::raw: Sending heartbeat message
+2026-02-14T16:14:30.857696Z DEBUG steam_vent::net: writing raw k_EMsgClientHeartBeat message
+2026-02-14T16:14:30.857720Z TRACE steam_vent::net: writing header for k_EMsgClientHeartBeat protobuf message: NetMessageHeader { source_job_id: JobId(18446744073709551615), target_job_id: JobId(18446744073709551615), steam_id: SteamID(117093590311632896) {ID: 0, Instance: {Type: All, Flags: None}, Type: AnonUser, Universe: Public}, session_id: -238499736, target_job_name: None, result: None, source_app_id: None }
+2026-02-14T16:14:30.857755Z TRACE steam_vent::message: writing body of protobuf message k_EMsgClientHeartBeat
+2026-02-14T16:14:30.857768Z TRACE steam_vent::net: encoded body(0 bytes): []
+2026-02-14T16:14:30.857800Z ERROR steam_vent::connection::raw: Failed to send heartbeat message error=Ws(AlreadyClosed)
+2026-02-14T16:14:39.859982Z DEBUG steam_vent::connection::raw: Sending heartbeat message
+2026-02-14T16:14:39.860017Z DEBUG steam_vent::net: writing raw k_EMsgClientHeartBeat message
+2026-02-14T16:14:39.860045Z TRACE steam_vent::net: writing header for k_EMsgClientHeartBeat protobuf message: NetMessageHeader { source_job_id: JobId(18446744073709551615), target_job_id: JobId(18446744073709551615), steam_id: SteamID(117093590311632896) {ID: 0, Instance: {Type: All, Flags: None}, Type: AnonUser, Universe: Public}, session_id: -238499736, target_job_name: None, result: None, source_app_id: None }
+2026-02-14T16:14:39.860086Z TRACE steam_vent::message: writing body of protobuf message k_EMsgClientHeartBeat
+2026-02-14T16:14:39.860099Z TRACE steam_vent::net: encoded body(0 bytes): []
+2026-02-14T16:14:39.860131Z ERROR steam_vent::connection::raw: Failed to send heartbeat message error=Ws(AlreadyClosed)
+2026-02-14T16:14:43.501881Z DEBUG steam_vent::connection::raw: Heartbeat task stopping
+Error: Response timed out
+error: process didn't exit successfully: `target\debug\SteamVentCdn.exe --item-id 2824688072` (exit code: 1)
