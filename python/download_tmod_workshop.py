@@ -72,8 +72,10 @@ class TModDownloader:
             print("匿名ユーザーとしてログイン中...")
             result = self.steam_client.anonymous_login()
 
+
             if result == EResult.OK:
                 print("匿名ログイン成功！")
+                print(f"steam_id: {self.steam_client.steam_id}")
                 self.cdn_client = CDNClient(self.steam_client)
                 return True
             else:

@@ -10,18 +10,15 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use steam_vent::ConnectionTrait;
 use steam_vent::ServerList;
-use steam_vent::ServiceMethodRequest;
 use steam_vent::connection::Connection;
 
-use steam_vent_proto::RpcMessage;
 use steam_vent_proto::content_manifest::{ContentManifestMetadata, ContentManifestPayload};
-use steam_vent_proto::protobuf::{self, Message};
+use steam_vent_proto::protobuf::Message;
 use steam_vent_proto::steammessages_clientserver_2::{
     CMsgClientGetDepotDecryptionKey, CMsgClientGetDepotDecryptionKeyResponse,
 };
 use steam_vent_proto::steammessages_contentsystem_steamclient::{
     CContentServerDirectory_GetManifestRequestCode_Request,
-    CContentServerDirectory_GetManifestRequestCode_Response,
     CContentServerDirectory_GetServersForSteamPipe_Request,
 };
 use steam_vent_proto::steammessages_publishedfile_steamclient::CPublishedFile_GetDetails_Request;
