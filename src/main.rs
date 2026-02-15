@@ -1,15 +1,16 @@
+mod archive;
+mod cdn;
 mod config;
 mod connection;
-mod cdn;
 mod downloader;
 mod error;
 mod manifest;
-mod utils;
 
 use clap::Parser;
+use downloader::{CdnDownloader, DownloadItem};
+use error::{Result, SteamVentError};
+use futures::StreamExt;
 use std::path::PathBuf;
-use downloader::TModDownloader;
-use error::Result;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -38,20 +39,45 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
-    
+
     let args = Args::parse();
     println!("Item ID: {}", args.item_id);
 
-    let mut downloader = TModDownloader::new(args.username, args.password).await?;
+    let mut downloader = CdnDownloader::new(args.username, args.password).await?;
     downloader.login().await?;
 
-    if args.list {
-        downloader.list_files(args.item_id, &args.filter).await?;
-    } else {
-        let downloaded = downloader
-            .download_item(args.item_id, &args.output, &args.filter)
-            .await?;
-        println!("Downloaded {} files.", downloaded.len());
+    let files = downloader.fetch_manifest_info(args.item_id).await?;
+
+    let items: Vec<DownloadItem> = files
+        .into_iter()
+        .filter(|(filename, _)| filename.ends_with(".tmod"))
+        .map(|(filename, manifest_info)| DownloadItem {
+            item_id: args.item_id,
+            filename,
+            manifest_info,
+        })
+        .collect();
+
+    println!("Found {} files to download.", items.len());
+
+    for item in items {
+        let stream = downloader.get_stream(&item).await?;
+        let output_path = args.output.join(&item.filename);
+
+        if let Some(parent) = output_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let mut file = std::fs::File::create(&output_path)?;
+
+        let chunks: Vec<std::result::Result<Vec<u8>, SteamVentError>> = stream.collect().await;
+
+        for chunk_result in chunks {
+            let chunk = chunk_result?;
+            std::io::Write::write_all(&mut file, &chunk)?;
+        }
+
+        println!("Downloaded: {}", item.filename);
     }
 
     Ok(())

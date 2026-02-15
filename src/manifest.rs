@@ -1,8 +1,8 @@
 use crate::error::{Result, SteamVentError};
-use crate::utils::ArchiveExtractor;
-use aes::cipher::{block_padding::Pkcs7, BlockDecrypt, BlockDecryptMut, KeyInit, KeyIvInit};
+
 use aes::Aes256;
-use base64::{engine::general_purpose, Engine as _};
+use aes::cipher::{BlockDecrypt, BlockDecryptMut, KeyInit, KeyIvInit, block_padding::Pkcs7};
+use base64::{Engine as _, engine::general_purpose};
 use cbc::Decryptor;
 use steam_vent_proto::content_manifest::{ContentManifestMetadata, ContentManifestPayload};
 use steam_vent_proto::protobuf::Message;
@@ -11,7 +11,6 @@ pub trait ManifestParser: Send + Sync {
     fn parse(
         &self,
         payload_bytes: &[u8],
-        extractor: &dyn ArchiveExtractor,
     ) -> Result<(ContentManifestPayload, Option<ContentManifestMetadata>)>;
     fn decrypt_filenames(
         &self,
@@ -76,9 +75,15 @@ impl ManifestParser for ProtobufManifestParser {
     fn parse(
         &self,
         payload_bytes: &[u8],
-        extractor: &dyn ArchiveExtractor,
     ) -> Result<(ContentManifestPayload, Option<ContentManifestMetadata>)> {
-        let payload_bytes = extractor.maybe_extract(payload_bytes)?;
+        let payload_bytes_vec;
+        let payload_bytes =
+            if let Ok(extractor) = crate::archive::ZipArchiveExtractor::new(payload_bytes) {
+                payload_bytes_vec = extractor.extract()?;
+                &payload_bytes_vec
+            } else {
+                payload_bytes
+            };
 
         let mut final_payload = Vec::new();
         let mut metadata: Option<ContentManifestMetadata> = None;
@@ -134,7 +139,7 @@ impl ManifestParser for ProtobufManifestParser {
 
         if final_payload.is_empty() {
             log::warn!("No Payload segment found, using raw bytes as fallback");
-            final_payload = payload_bytes;
+            final_payload = payload_bytes.to_vec();
         }
 
         let manifest = ContentManifestPayload::parse_from_bytes(&final_payload)
