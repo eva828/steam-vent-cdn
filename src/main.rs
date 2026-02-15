@@ -1,9 +1,15 @@
-use anyhow::Result;
+mod config;
+mod connection;
+mod cdn;
+mod downloader;
+mod error;
+mod manifest;
+mod utils;
+
 use clap::Parser;
 use std::path::PathBuf;
-
-mod downloader;
 use downloader::TModDownloader;
+use error::Result;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -32,6 +38,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
+    
     let args = Args::parse();
     println!("Item ID: {}", args.item_id);
 
