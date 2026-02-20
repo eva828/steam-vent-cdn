@@ -1,7 +1,7 @@
 use crate::archive::ZipArchiveExtractor;
+use crate::config::DownloaderConfig;
 use crate::error::{Result, SteamVentError};
 use reqwest::Client as HttpClient;
-use std::time::Duration;
 use steam_vent::ConnectionTrait;
 use steam_vent::connection::Connection;
 use steam_vent_proto::steammessages_contentsystem_steamclient::CContentServerDirectory_GetServersForSteamPipe_Request;
@@ -10,13 +10,18 @@ use steam_vent_proto::steammessages_contentsystem_steamclient::CContentServerDir
 pub struct CdnClient {
     http_client: HttpClient,
     cdn_host: Option<String>,
+    config: DownloaderConfig,
 }
 
 impl CdnClient {
-    pub fn new() -> Self {
+    pub fn new(config: DownloaderConfig) -> Self {
         Self {
-            http_client: HttpClient::new(),
+            http_client: HttpClient::builder()
+                .timeout(config.timeout)
+                .build()
+                .unwrap_or_else(|_| HttpClient::new()),
             cdn_host: None,
+            config,
         }
     }
 
@@ -90,10 +95,10 @@ impl CdnClient {
                 } else {
                     return Ok(data.to_vec());
                 }
-            } else if retry_count < 3 {
+            } else if retry_count < self.config.max_retries {
                 log::warn!("Retrying chunk {} (status: {})", chunk_id, resp.status());
                 retry_count += 1;
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                tokio::time::sleep(self.config.retry_delay).await;
             } else {
                 return Err(SteamVentError::Cdn(format!(
                     "Failed to download chunk {}: {}",

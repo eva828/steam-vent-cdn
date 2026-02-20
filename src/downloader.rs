@@ -52,17 +52,22 @@ pub struct DownloadItem {
 
 impl CdnDownloader {
     pub async fn new(username: Option<String>, password: Option<String>) -> Result<Self> {
-        let steam_client = SteamClient::new().await?;
+        let config = DownloaderConfig::new(username, password);
+        let steam_client = SteamClient::new(config.clone()).await?;
         Ok(Self {
-            config: DownloaderConfig::new(username, password),
+            config: config.clone(),
             steam_client,
-            cdn_client: CdnClient::new(),
+            cdn_client: CdnClient::new(config),
             manifest_parser: ProtobufManifestParser,
         })
     }
 
     pub async fn login(&mut self) -> Result<()> {
-        self.steam_client.connect_anonymous().await
+        if self.config.username.is_some() && self.config.password.is_some() {
+            self.steam_client.login().await
+        } else {
+            self.steam_client.connect_anonymous().await
+        }
     }
 
     async fn fetch_item_details(&mut self, item_id: u64) -> Result<PublishedFileDetails> {
@@ -218,34 +223,6 @@ impl CdnDownloader {
         }
 
         Ok(files)
-    }
-
-    pub fn extract_file_info(
-        manifest: &DownloadManifest,
-        filename: &str,
-    ) -> Result<FileManifestInfo> {
-        for mapping in &manifest.manifest.mappings {
-            let file_name = mapping.filename.as_deref().unwrap_or("");
-            if file_name == filename {
-                let chunks: Vec<ChunkInfo> = mapping
-                    .chunks
-                    .iter()
-                    .map(|c| ChunkInfo {
-                        sha: c.sha.clone().unwrap_or_default(),
-                    })
-                    .collect();
-
-                return Ok(FileManifestInfo {
-                    server_host: manifest.server_host.clone(),
-                    depot_id: manifest.depot_id,
-                    chunks,
-                });
-            }
-        }
-        Err(SteamVentError::InvalidData(format!(
-            "File {} not found in manifest",
-            filename
-        )))
     }
 
     pub async fn get_stream(
