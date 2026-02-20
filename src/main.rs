@@ -8,15 +8,19 @@ mod manifest;
 
 use clap::Parser;
 use downloader::{CdnDownloader, DownloadItem};
-use error::{Result, SteamVentError};
+use error::Result;
 use futures::StreamExt;
 use std::path::PathBuf;
+use tokio::io::AsyncWriteExt;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
     #[arg(short, long)]
     item_id: u64,
+
+    #[arg(short, long)]
+    app_id: Option<u32>,
 
     #[arg(short, long, default_value = "./mods")]
     output: PathBuf,
@@ -32,6 +36,9 @@ struct Args {
 
     #[arg(short, long)]
     list: bool,
+
+    #[arg(short = 'c', long)]
+    concurrent_downloads: Option<usize>,
 }
 
 #[tokio::main]
@@ -49,7 +56,9 @@ async fn main() -> Result<()> {
         }
         _ => crate::config::Credentials::Anonymous,
     };
-    let config = crate::config::DownloaderConfig::new(credentials);
+    let config = crate::config::DownloaderConfig::new(credentials)
+        .with_app_id(args.app_id)
+        .with_concurrent_downloads(args.concurrent_downloads);
 
     let steam_client = crate::connection::SteamClient::new(config);
 
@@ -73,19 +82,18 @@ async fn main() -> Result<()> {
 
     for item in items {
         let stream = downloader.get_stream(&item).await?;
+        tokio::pin!(stream);
         let output_path = args.output.join(&item.filename);
 
         if let Some(parent) = output_path.parent() {
-            std::fs::create_dir_all(parent)?;
+            tokio::fs::create_dir_all(parent).await?;
         }
 
-        let mut file = std::fs::File::create(&output_path)?;
+        let mut file = tokio::fs::File::create(&output_path).await?;
 
-        let chunks: Vec<std::result::Result<Vec<u8>, SteamVentError>> = stream.collect().await;
-
-        for chunk_result in chunks {
+        while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result?;
-            std::io::Write::write_all(&mut file, &chunk)?;
+            file.write_all(&chunk).await?;
         }
 
         println!("Downloaded: {}", item.filename);

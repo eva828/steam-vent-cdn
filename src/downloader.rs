@@ -25,7 +25,7 @@ pub struct CdnDownloader {
 #[derive(Debug, Clone)]
 pub struct DownloadManifest {
     pub manifest: ContentManifestPayload,
-    pub server_host: String,
+    pub server_hosts: Vec<String>,
     pub depot_id: u32,
 }
 
@@ -36,7 +36,7 @@ pub struct ChunkInfo {
 
 #[derive(Debug, Clone)]
 pub struct FileManifestInfo {
-    pub server_host: String,
+    pub server_hosts: Vec<String>,
     pub depot_id: u32,
     pub chunks: Vec<ChunkInfo>,
 }
@@ -130,13 +130,12 @@ impl CdnDownloader {
 
     async fn fetch_manifest(&mut self, item_id: u64) -> Result<DownloadManifest> {
         self.cdn_client
-            .resolve_cdn_host(self.steam_client.connection_mut())
+            .resolve_cdn_hosts(self.steam_client.connection_mut())
             .await?;
-        let server = self
-            .cdn_client
-            .cdn_host()
-            .ok_or_else(|| SteamVentError::Cdn("CDN host not resolved".to_string()))?
-            .to_string();
+        let servers = self.cdn_client.cdn_hosts().to_vec();
+        if servers.is_empty() {
+            return Err(SteamVentError::Cdn("CDN hosts not resolved".to_string()));
+        }
 
         let details = self.fetch_item_details(item_id).await?;
 
@@ -146,7 +145,8 @@ impl CdnDownloader {
         let manifest_id = details.hcontent_file.ok_or_else(|| {
             SteamVentError::InvalidData("No manifest ID (hcontent_file) found".to_string())
         })?;
-        let app_id = details.consumer_appid.unwrap_or(1281930);
+        let config_app_id = self.steam_client.config().app_id;
+        let app_id = details.consumer_appid.unwrap_or(config_app_id);
         let depot_id = app_id;
 
         log::info!("Manifest ID: {}", manifest_id);
@@ -159,7 +159,7 @@ impl CdnDownloader {
 
         let manifest_bytes = self
             .cdn_client
-            .download_manifest(&server, depot_id, manifest_id, mrc)
+            .download_manifest(&servers, depot_id, manifest_id, mrc)
             .await?;
 
         let (mut manifest, metadata) = self.manifest_parser.parse(&manifest_bytes)?;
@@ -181,7 +181,7 @@ impl CdnDownloader {
 
         Ok(DownloadManifest {
             manifest,
-            server_host: server,
+            server_hosts: servers,
             depot_id,
         })
     }
@@ -206,7 +206,7 @@ impl CdnDownloader {
             files.insert(
                 filename,
                 FileManifestInfo {
-                    server_host: manifest_data.server_host.clone(),
+                    server_hosts: manifest_data.server_hosts.clone(),
                     depot_id: manifest_data.depot_id,
                     chunks,
                 },
@@ -220,19 +220,23 @@ impl CdnDownloader {
         &self,
         item: &DownloadItem,
     ) -> Result<impl Stream<Item = Result<Vec<u8>>> + '_> {
-        let server_host = item.manifest_info.server_host.clone();
+        let server_hosts = item.manifest_info.server_hosts.clone();
         let depot_id = item.manifest_info.depot_id;
         let chunks: Vec<ChunkInfo> = item.manifest_info.chunks.clone();
 
-        Ok(stream::iter(chunks).then(move |chunk| {
-            let server = server_host.clone();
-            let cdn_client = self.cdn_client.clone();
-            async move {
-                let chunk_id = hex::encode(chunk.sha);
-                cdn_client
-                    .download_chunk(&server, depot_id, &chunk_id)
-                    .await
-            }
-        }))
+        let concurrent_downloads = self.steam_client.config().concurrent_downloads;
+
+        Ok(stream::iter(chunks)
+            .map(move |chunk| {
+                let servers = server_hosts.clone();
+                let cdn_client = self.cdn_client.clone();
+                async move {
+                    let chunk_id = hex::encode(chunk.sha);
+                    cdn_client
+                        .download_chunk(&servers, depot_id, &chunk_id)
+                        .await
+                }
+            })
+            .buffered(concurrent_downloads))
     }
 }
