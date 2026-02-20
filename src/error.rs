@@ -11,9 +11,6 @@ pub enum SteamVentError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("Authentication failed: {0}")]
-    Auth(String),
-
     #[error("CDN error: {0}")]
     Cdn(String),
 
@@ -25,9 +22,6 @@ pub enum SteamVentError {
 
     #[error("Invalid data: {0}")]
     InvalidData(String),
-
-    #[error("Timeout: {0}")]
-    Timeout(String),
 
     #[error("Anyhow error: {0}")]
     Anyhow(#[from] anyhow::Error),

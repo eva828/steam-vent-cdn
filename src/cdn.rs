@@ -102,6 +102,10 @@ impl CdnClient {
         depot_id: u32,
         chunk_id: &str,
     ) -> Result<Vec<u8>> {
+        if server_hosts.is_empty() {
+            return Err(SteamVentError::Cdn("No CDN servers available".to_string()));
+        }
+
         let mut retry_count = 0;
         let max_attempts = std::cmp::max(self.config.max_retries, server_hosts.len() as u32);
 
@@ -111,6 +115,8 @@ impl CdnClient {
                 "https://{}/depot/{}/chunk/{}",
                 server_host, depot_id, chunk_id
             );
+
+            let mut should_sleep = true;
 
             match self.http_client.get(&chunk_url).send().await {
                 Ok(resp) if resp.status().is_success() => {
@@ -122,12 +128,18 @@ impl CdnClient {
                     }
                 }
                 Ok(resp) => {
+                    let status = resp.status();
                     log::warn!(
                         "Retrying chunk {} from {} (status: {})",
                         chunk_id,
                         server_host,
-                        resp.status()
+                        status
                     );
+                    if status == reqwest::StatusCode::NOT_FOUND
+                        || status == reqwest::StatusCode::FORBIDDEN
+                    {
+                        should_sleep = false;
+                    }
                 }
                 Err(e) => {
                     log::warn!(
@@ -141,7 +153,9 @@ impl CdnClient {
 
             if retry_count < max_attempts {
                 retry_count += 1;
-                tokio::time::sleep(self.config.retry_delay).await;
+                if should_sleep {
+                    tokio::time::sleep(self.config.retry_delay).await;
+                }
             } else {
                 return Err(SteamVentError::Cdn(format!(
                     "Failed to download chunk {} after {} attempts",
