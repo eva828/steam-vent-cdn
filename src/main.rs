@@ -43,8 +43,19 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     println!("Item ID: {}", args.item_id);
 
-    let mut downloader = CdnDownloader::new(args.username, args.password).await?;
-    downloader.login().await?;
+    let credentials = match (args.username, args.password) {
+        (Some(username), Some(password)) => {
+            crate::config::Credentials::UserPass { username, password }
+        }
+        _ => crate::config::Credentials::Anonymous,
+    };
+    let config = crate::config::DownloaderConfig::new(credentials);
+
+    let steam_client = crate::connection::SteamClient::new(config);
+
+    let steam_session = steam_client.connect().await?;
+
+    let mut downloader = CdnDownloader::new(steam_session);
 
     let files = downloader.fetch_manifest_info(args.item_id).await?;
 

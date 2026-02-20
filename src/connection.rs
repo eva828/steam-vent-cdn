@@ -6,80 +6,65 @@ use steam_vent::auth::{FileGuardDataStore, UserProvidedAuthConfirmationHandler};
 use steam_vent::connection::Connection;
 
 pub struct SteamClient {
-    connection: Option<Connection>,
-    server_list: ServerList,
+    config: DownloaderConfig,
+}
+
+pub struct SteamSession {
+    pub connection: Connection,
     config: DownloaderConfig,
 }
 
 impl SteamClient {
-    pub async fn new(config: DownloaderConfig) -> Result<Self> {
+    pub fn new(config: DownloaderConfig) -> Self {
+        Self { config }
+    }
+
+    pub async fn connect(self) -> Result<SteamSession> {
         let server_list = ServerList::discover()
             .await
             .map_err(|e| SteamVentError::Connection(e.to_string()))?;
 
-        Ok(Self {
-            connection: None,
-            server_list,
-            config,
+        let mut connection = match &self.config.credentials {
+            crate::config::Credentials::Anonymous => {
+                log::info!("Connecting anonymously to Steam...");
+                Connection::anonymous(&server_list)
+                    .await
+                    .map_err(|e| SteamVentError::Connection(e.to_string()))?
+            }
+            crate::config::Credentials::UserPass { username, password } => {
+                log::info!("Logging in as {}...", username);
+                let auth_handler = UserProvidedAuthConfirmationHandler::new(
+                    tokio::io::stdin(),
+                    tokio::io::stdout(),
+                );
+                let guard_store = FileGuardDataStore::user_cache();
+
+                Connection::login(&server_list, username, password, guard_store, auth_handler)
+                    .await
+                    .map_err(|e| SteamVentError::Connection(e.to_string()))?
+            }
+        };
+
+        connection.set_timeout(self.config.timeout);
+
+        // SteamのLogonシーケンスが完了し、セッションが完全に確立されるのを待機するために必要です。
+        // （待機せずに後続のリクエストを送信すると、NotLoggedOn等で弾かれる可能性があります）
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        log::info!("Connected.");
+        Ok(SteamSession {
+            connection,
+            config: self.config,
         })
     }
+}
 
-    pub async fn connect_anonymous(&mut self) -> Result<()> {
-        log::info!("Connecting anonymously to Steam...");
-
-        let mut connection = Connection::anonymous(&self.server_list)
-            .await
-            .map_err(|e| SteamVentError::Connection(e.to_string()))?;
-
-        connection.set_timeout(self.config.timeout);
-
-        tokio::time::sleep(Duration::from_millis(500)).await;
-
-        self.connection = Some(connection);
-        log::info!("Connected.");
-        Ok(())
+impl SteamSession {
+    pub fn connection_mut(&mut self) -> &mut Connection {
+        &mut self.connection
     }
 
-    pub async fn login(&mut self) -> Result<()> {
-        let username = self
-            .config
-            .username
-            .as_deref()
-            .ok_or_else(|| SteamVentError::Connection("No username provided".to_string()))?;
-        let password = self
-            .config
-            .password
-            .as_deref()
-            .ok_or_else(|| SteamVentError::Connection("No password provided".to_string()))?;
-
-        log::info!("Logging in as {}...", username);
-
-        let auth_handler =
-            UserProvidedAuthConfirmationHandler::new(tokio::io::stdin(), tokio::io::stdout());
-        let guard_store = FileGuardDataStore::user_cache();
-
-        let mut connection = Connection::login(
-            &self.server_list,
-            username,
-            password,
-            guard_store,
-            auth_handler,
-        )
-        .await
-        .map_err(|e| SteamVentError::Connection(e.to_string()))?;
-
-        connection.set_timeout(self.config.timeout);
-
-        tokio::time::sleep(Duration::from_millis(500)).await;
-
-        self.connection = Some(connection);
-        log::info!("Logged in.");
-        Ok(())
-    }
-
-    pub fn connection_mut(&mut self) -> Result<&mut Connection> {
-        self.connection
-            .as_mut()
-            .ok_or_else(|| SteamVentError::Connection("Not connected".to_string()))
+    pub fn config(&self) -> &DownloaderConfig {
+        &self.config
     }
 }

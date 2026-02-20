@@ -1,9 +1,20 @@
 use std::time::Duration;
 
 #[derive(Debug, Clone)]
+pub enum Credentials {
+    Anonymous,
+    UserPass { username: String, password: String },
+}
+
+impl Default for Credentials {
+    fn default() -> Self {
+        Self::Anonymous
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct DownloaderConfig {
-    pub username: Option<String>,
-    pub password: Option<String>,
+    pub credentials: Credentials,
     pub timeout: Duration,
     pub max_retries: u32,
     pub retry_delay: Duration,
@@ -12,8 +23,7 @@ pub struct DownloaderConfig {
 impl Default for DownloaderConfig {
     fn default() -> Self {
         Self {
-            username: None,
-            password: None,
+            credentials: Credentials::default(),
             timeout: Duration::from_secs(30),
             max_retries: 3,
             retry_delay: Duration::from_secs(1),
@@ -22,10 +32,9 @@ impl Default for DownloaderConfig {
 }
 
 impl DownloaderConfig {
-    pub fn new(username: Option<String>, password: Option<String>) -> Self {
+    pub fn new(credentials: Credentials) -> Self {
         Self {
-            username,
-            password,
+            credentials,
             ..Default::default()
         }
     }

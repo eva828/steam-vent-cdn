@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 
 use crate::cdn::CdnClient;
-use crate::config::DownloaderConfig;
-use crate::connection::SteamClient;
+use crate::connection::SteamSession;
 use crate::error::{Result, SteamVentError};
-use crate::manifest::{ManifestParser, ProtobufManifestParser};
+use crate::manifest::ProtobufManifestParser;
 use futures::stream::{self, Stream, StreamExt};
 use hex;
 use steam_vent::ConnectionTrait;
@@ -18,8 +17,7 @@ use steam_vent_proto::steammessages_publishedfile_steamclient::{
 };
 
 pub struct CdnDownloader {
-    config: DownloaderConfig,
-    steam_client: SteamClient,
+    steam_client: SteamSession,
     cdn_client: CdnClient,
     manifest_parser: ProtobufManifestParser,
 }
@@ -45,28 +43,21 @@ pub struct FileManifestInfo {
 
 #[derive(Debug, Clone)]
 pub struct DownloadItem {
+    // Currently unused during download/extraction, but kept as it conceptually
+    // identifies the workshop item this file belongs to. Useful for future extensions.
+    #[allow(dead_code)]
     pub item_id: u64,
     pub filename: String,
     pub manifest_info: FileManifestInfo,
 }
 
 impl CdnDownloader {
-    pub async fn new(username: Option<String>, password: Option<String>) -> Result<Self> {
-        let config = DownloaderConfig::new(username, password);
-        let steam_client = SteamClient::new(config.clone()).await?;
-        Ok(Self {
-            config: config.clone(),
+    pub fn new(steam_client: SteamSession) -> Self {
+        let config = steam_client.config().clone();
+        Self {
             steam_client,
             cdn_client: CdnClient::new(config),
             manifest_parser: ProtobufManifestParser,
-        })
-    }
-
-    pub async fn login(&mut self) -> Result<()> {
-        if self.config.username.is_some() && self.config.password.is_some() {
-            self.steam_client.login().await
-        } else {
-            self.steam_client.connect_anonymous().await
         }
     }
 
@@ -77,7 +68,7 @@ impl CdnDownloader {
         };
         let details_resp = self
             .steam_client
-            .connection_mut()?
+            .connection_mut()
             .service_method(details_req)
             .await
             .map_err(|e| SteamVentError::Connection(e.to_string()))?;
@@ -106,7 +97,7 @@ impl CdnDownloader {
 
         let code_resp = self
             .steam_client
-            .connection_mut()?
+            .connection_mut()
             .service_method(code_req)
             .await
             .map_err(|e| SteamVentError::Connection(e.to_string()))?;
@@ -124,7 +115,7 @@ impl CdnDownloader {
 
         let key_resp: CMsgClientGetDepotDecryptionKeyResponse = self
             .steam_client
-            .connection_mut()?
+            .connection_mut()
             .job(key_req)
             .await
             .map_err(|e| SteamVentError::Connection(e.to_string()))?;
@@ -139,7 +130,7 @@ impl CdnDownloader {
 
     async fn fetch_manifest(&mut self, item_id: u64) -> Result<DownloadManifest> {
         self.cdn_client
-            .resolve_cdn_host(self.steam_client.connection_mut()?)
+            .resolve_cdn_host(self.steam_client.connection_mut())
             .await?;
         let server = self
             .cdn_client

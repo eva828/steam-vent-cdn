@@ -7,18 +7,6 @@ use cbc::Decryptor;
 use steam_vent_proto::content_manifest::{ContentManifestMetadata, ContentManifestPayload};
 use steam_vent_proto::protobuf::Message;
 
-pub trait ManifestParser: Send + Sync {
-    fn parse(
-        &self,
-        payload_bytes: &[u8],
-    ) -> Result<(ContentManifestPayload, Option<ContentManifestMetadata>)>;
-    fn decrypt_filenames(
-        &self,
-        manifest: &mut ContentManifestPayload,
-        depot_key: &[u8],
-    ) -> Result<()>;
-}
-
 pub struct ProtobufManifestParser;
 
 impl ProtobufManifestParser {
@@ -71,8 +59,8 @@ impl ProtobufManifestParser {
     }
 }
 
-impl ManifestParser for ProtobufManifestParser {
-    fn parse(
+impl ProtobufManifestParser {
+    pub fn parse(
         &self,
         payload_bytes: &[u8],
     ) -> Result<(ContentManifestPayload, Option<ContentManifestMetadata>)> {
@@ -148,7 +136,7 @@ impl ManifestParser for ProtobufManifestParser {
         Ok((manifest, metadata))
     }
 
-    fn decrypt_filenames(
+    pub fn decrypt_filenames(
         &self,
         manifest: &mut ContentManifestPayload,
         depot_key: &[u8],
