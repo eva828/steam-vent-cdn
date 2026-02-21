@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::cdn::CdnClient;
-use crate::connection::SteamSession;
+use crate::connection::{ConnectionExt, SteamSession};
 use crate::error::{Result, SteamVentError};
 use crate::manifest::ProtobufManifestParser;
 use futures::stream::{self, Stream, StreamExt};
@@ -66,12 +66,16 @@ impl CdnDownloader {
             publishedfileids: vec![item_id],
             ..Default::default()
         };
+
+        let max_retries = self.steam_client.config().max_retries;
+        let retry_delay = self.steam_client.config().retry_delay;
+
         let details_resp = self
             .steam_client
             .connection_mut()
-            .service_method(details_req)
-            .await
-            .map_err(|e| SteamVentError::Connection(e.to_string()))?;
+            .service_method_with_retry(details_req, max_retries, retry_delay)
+            .await?;
+
         if details_resp.publishedfiledetails.is_empty() {
             return Err(SteamVentError::InvalidData(format!(
                 "No details found for item {}",

@@ -1,5 +1,5 @@
 [package]
-name = "SteamVentCdn"
+name = "steam-vent-cdn"
 version = "0.1.0"
 edition = "2024"
 
@@ -37,3 +37,4 @@ aes = "0.8.3"
 cbc = "0.1.2"
 steam-vent = { git = "https://codeberg.org/eva828/steam-vent.git", branch = "main" }
 steam-vent-proto = "0.5.2"
+tracing-appender = "0.2.4"

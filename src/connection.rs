@@ -1,6 +1,6 @@
 use crate::config::DownloaderConfig;
 use crate::error::{Result, SteamVentError};
-use std::time::Duration;
+
 use steam_vent::ServerList;
 use steam_vent::auth::{FileGuardDataStore, UserProvidedAuthConfirmationHandler};
 use steam_vent::connection::Connection;
@@ -47,10 +47,6 @@ impl SteamClient {
 
         connection.set_timeout(self.config.timeout);
 
-        // SteamのLogonシーケンスが完了し、セッションが完全に確立されるのを待機するために必要です。
-        // （待機せずに後続のリクエストを送信すると、NotLoggedOn等で弾かれる可能性があります）
-        tokio::time::sleep(Duration::from_millis(500)).await;
-
         log::info!("Connected.");
         Ok(SteamSession {
             connection,
@@ -68,3 +64,44 @@ impl SteamSession {
         &self.config
     }
 }
+
+pub trait ConnectionExt: steam_vent::ConnectionTrait + Sync {
+    fn service_method_with_retry<'a, R>(
+        &'a self,
+        req: R,
+        max_retries: u32,
+        retry_delay: std::time::Duration,
+    ) -> impl std::future::Future<Output = Result<R::Response>> + Send + 'a
+    where
+        R: steam_vent::ServiceMethodRequest + Clone + Send + 'static,
+        R::Response: Send,
+    {
+        async move {
+            let mut retry_count = 0;
+            loop {
+                let e = match self.service_method(req.clone()).await {
+                    Ok(resp) => return Ok(resp),
+                    Err(e) => e,
+                };
+
+                match &e {
+                    steam_vent::NetworkError::ApiError(
+                        steam_vent::EResult::NotLoggedOn | steam_vent::EResult::AccessDenied,
+                    ) if retry_count < max_retries => {
+                        log::debug!(
+                            "Login not fully established, retrying {} (attempt {}): {}",
+                            std::any::type_name::<R>(),
+                            retry_count + 1,
+                            e
+                        );
+                        tokio::time::sleep(retry_delay).await;
+                        retry_count += 1;
+                    }
+                    _ => return Err(SteamVentError::Connection(e.to_string())),
+                }
+            }
+        }
+    }
+}
+
+impl<T: steam_vent::ConnectionTrait + Send + Sync> ConnectionExt for T {}

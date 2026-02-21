@@ -1,9 +1,8 @@
 use crate::archive::ZipArchiveExtractor;
 use crate::config::DownloaderConfig;
+use crate::connection::ConnectionExt;
 use crate::error::{Result, SteamVentError};
 use reqwest::Client as HttpClient;
-use steam_vent::ConnectionTrait;
-use steam_vent::connection::Connection;
 use steam_vent_proto::steammessages_contentsystem_steamclient::CContentServerDirectory_GetServersForSteamPipe_Request;
 
 #[derive(Clone)]
@@ -25,7 +24,7 @@ impl CdnClient {
         }
     }
 
-    pub async fn resolve_cdn_hosts(&mut self, conn: &mut Connection) -> Result<()> {
+    pub async fn resolve_cdn_hosts(&mut self, connection: &mut impl ConnectionExt) -> Result<()> {
         if !self.cdn_hosts.is_empty() {
             return Ok(());
         }
@@ -38,10 +37,9 @@ impl CdnClient {
             ..Default::default()
         };
 
-        let srv_resp = conn
-            .service_method(srv_req)
-            .await
-            .map_err(|e| SteamVentError::Connection(e.to_string()))?;
+        let srv_resp = connection
+            .service_method_with_retry(srv_req, self.config.max_retries, self.config.retry_delay)
+            .await?;
 
         if srv_resp.servers.is_empty() {
             return Err(SteamVentError::Cdn("No CDN servers available".to_string()));

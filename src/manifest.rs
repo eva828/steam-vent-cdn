@@ -38,11 +38,11 @@ impl ProtobufManifestParser {
                         let decryptor = Decryptor::<Aes256>::new(aes_key, &iv_bytes.into());
                         match decryptor.decrypt_padded_mut::<Pkcs7>(&mut buf) {
                             Ok(plaintext) => {
-                                return Some(
-                                    String::from_utf8_lossy(plaintext)
-                                        .trim_matches(char::from(0))
-                                        .to_string(),
-                                );
+                                let clean_bytes = match plaintext.iter().position(|&b| b == 0) {
+                                    Some(pos) => &plaintext[..pos],
+                                    None => plaintext,
+                                };
+                                return Some(String::from_utf8_lossy(clean_bytes).into_owned());
                             }
                             Err(e) => {
                                 log::warn!("Decryption failed for {}: {:?}", enc_val, e);
