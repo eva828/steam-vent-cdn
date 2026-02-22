@@ -132,7 +132,7 @@ impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
         let uncompressed_size =
             u32::from_le_bytes(uncompressed_size_bytes.try_into().unwrap_or([0; 4])) as usize;
 
-        // If size is zero or unreasonably large, fallback to raw
+        // If size is zero or unreasonably large, return error
         if uncompressed_size == 0 || uncompressed_size > 100_000_000 {
             return Err(SteamVentError::Cdn(format!(
                 "Suspicious uncompressed size {} (max 100MB)",
