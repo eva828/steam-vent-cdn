@@ -13,6 +13,7 @@ use futures::StreamExt;
 use std::path::PathBuf;
 use tokio::io::AsyncWriteExt;
 use tracing_subscriber::Layer;
+use tracing_subscriber::fmt::time::UtcTime;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
@@ -80,7 +81,11 @@ fn setup_tracing(verbose: bool) -> tracing_appender::non_blocking::WorkerGuard {
         .with_writer(std::io::stdout);
 
     let stdout_layer = if verbose {
-        base_stdout.with_level(true).with_target(true).boxed()
+        base_stdout
+            .with_level(true)
+            .with_target(true)
+            .with_timer(UtcTime::rfc_3339())
+            .boxed()
     } else {
         base_stdout
             .with_level(false)
@@ -104,7 +109,7 @@ async fn main() -> Result<()> {
 
     let _guard = setup_tracing(args.verbose);
 
-    log::info!("Item ID: {}", args.item_id);
+    tracing::debug!("Item ID: {}", args.item_id);
 
     let credentials = match (args.username, args.password) {
         (Some(username), Some(password)) => {
@@ -126,9 +131,9 @@ async fn main() -> Result<()> {
 
     let mut downloader = CdnDownloader::new(steam_session);
 
-    let files = downloader.fetch_manifest_info(args.item_id).await?;
+    let manifest_files = downloader.fetch_manifest_info(args.item_id).await?;
 
-    let items: Vec<DownloadItem> = files
+    let items: Vec<DownloadItem> = manifest_files
         .into_iter()
         .filter(|(filename, _)| {
             if let Some(f) = &args.filter {
@@ -144,38 +149,57 @@ async fn main() -> Result<()> {
         })
         .collect();
 
-    log::info!("Found {} files to download.", items.len());
+    const FLAG_DIRECTORY: u32 = 0x40;
+
+    let mut directories: Vec<DownloadItem> = Vec::new();
+    let mut files: Vec<DownloadItem> = Vec::new();
 
     for item in items {
+        if item.manifest_info.flags.unwrap_or(0) & FLAG_DIRECTORY != 0 {
+            directories.push(item);
+        } else {
+            files.push(item);
+        }
+    }
+
+    tracing::info!(
+        "Found {} directories and {} files to download.",
+        directories.len(),
+        files.len()
+    );
+
+    for dir in &directories {
         let output_path = args
             .output
             .join(args.app_id.to_string())
             .join(args.item_id.to_string())
-            .join(&item.filename);
+            .join(&dir.filename);
+
+        tokio::fs::create_dir_all(&output_path).await?;
+    }
+
+    for file in files {
+        let output_path = args
+            .output
+            .join(args.app_id.to_string())
+            .join(args.item_id.to_string())
+            .join(&file.filename);
 
         if let Some(parent) = output_path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
 
-        // Check if item is a directory (EDepotFileFlag::Directory = 64)
-        const FLAG_DIRECTORY: u32 = 0x40;
-        if (item.manifest_info.flags.unwrap_or(0) & FLAG_DIRECTORY) != 0 {
-            tokio::fs::create_dir_all(&output_path).await?;
-            log::info!("Created directory: {}", item.filename);
-            continue;
-        }
-
-        let stream = downloader.get_stream(&item).await?;
+        let stream = downloader.get_stream(&file).await?;
         tokio::pin!(stream);
 
-        let mut file = tokio::fs::File::create(&output_path).await?;
+        let mut file_handle = tokio::fs::File::create(&output_path).await?;
 
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result?;
-            file.write_all(&chunk).await?;
+            file_handle.write_all(&chunk).await?;
         }
 
-        log::info!("Downloaded: {}", item.filename);
+        tracing::info!("Downloaded: {}", file.filename);
     }
 
     Ok(())

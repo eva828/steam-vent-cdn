@@ -28,7 +28,7 @@ impl CdnClient {
             return Ok(());
         }
 
-        log::info!("Finding CDN servers...");
+        tracing::debug!("Finding CDN servers");
 
         let srv_req = CContentServerDirectory_GetServersForSteamPipe_Request {
             cell_id: Some(0),
@@ -68,7 +68,7 @@ impl CdnClient {
                 "https://{}/depot/{}/manifest/{}/5/{}",
                 server_host, depot_id, manifest_id, mrc
             );
-            log::info!("Downloading manifest from {}...", manifest_url);
+            tracing::debug!("Downloading manifest from {}", manifest_url);
 
             let fetch_result = async {
                 self.http_client
@@ -84,7 +84,7 @@ impl CdnClient {
             match fetch_result {
                 Ok(b) => return Ok(b.to_vec()),
                 Err(e) => {
-                    log::warn!("Failed to fetch manifest from {}: {}", server_host, e);
+                    tracing::warn!("Failed to fetch manifest from {}: {}", server_host, e);
                 }
             }
         }
@@ -122,14 +122,17 @@ impl CdnClient {
                     match crate::archive::SteamChunk::new(&data).decode(depot_key) {
                         Ok(decoded) => return Ok(decoded),
                         Err(e) => {
-                            log::warn!("Chunk decoding failed for {}: {}", chunk_id, e);
-                            return Ok(data.to_vec());
+                            tracing::error!("Chunk decoding failed for {}: {}", chunk_id, e);
+                            return Err(SteamVentError::Decryption(format!(
+                                "Chunk {} decode failed: {}",
+                                chunk_id, e
+                            )));
                         }
                     }
                 }
                 Ok(resp) => {
                     let status = resp.status();
-                    log::warn!(
+                    tracing::warn!(
                         "Retrying chunk {} from {} (status: {})",
                         chunk_id,
                         server_host,
@@ -142,7 +145,7 @@ impl CdnClient {
                     }
                 }
                 Err(e) => {
-                    log::warn!(
+                    tracing::warn!(
                         "Retrying chunk {} from {}: error {}",
                         chunk_id,
                         server_host,

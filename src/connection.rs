@@ -26,13 +26,13 @@ impl SteamClient {
 
         let mut connection = match &self.config.credentials {
             crate::config::Credentials::Anonymous => {
-                log::info!("Connecting anonymously to Steam...");
+                tracing::info!("Connecting anonymously to Steam");
                 Connection::anonymous(&server_list)
                     .await
                     .map_err(|e| SteamVentError::Connection(e.to_string()))?
             }
             crate::config::Credentials::UserPass { username, password } => {
-                log::info!("Logging in as {}...", username);
+                tracing::info!("Logging in as {}", username);
                 let auth_handler = UserProvidedAuthConfirmationHandler::new(
                     tokio::io::stdin(),
                     tokio::io::stdout(),
@@ -47,7 +47,7 @@ impl SteamClient {
 
         connection.set_timeout(self.config.timeout);
 
-        log::info!("Connected.");
+        tracing::info!("Connected.");
         Ok(SteamSession {
             connection,
             config: self.config,
@@ -88,7 +88,7 @@ pub trait ConnectionExt: steam_vent::ConnectionTrait + Sync {
                     steam_vent::NetworkError::ApiError(
                         steam_vent::EResult::NotLoggedOn | steam_vent::EResult::AccessDenied,
                     ) if retry_count < max_retries => {
-                        log::debug!(
+                        tracing::debug!(
                             "Login not fully established, retrying {} (attempt {}): {}",
                             std::any::type_name::<R>(),
                             retry_count + 1,

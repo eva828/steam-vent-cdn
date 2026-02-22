@@ -17,48 +17,56 @@ fn decrypt_string(
     enc_val: &str,
     aes_key: &aes::cipher::generic_array::GenericArray<u8, aes::cipher::typenum::U32>,
     cipher_ecb: &Aes256,
-) -> Option<String> {
+) -> Result<String> {
     if enc_val.is_empty() {
-        return None;
+        return Err(SteamVentError::Decryption(
+            "Empty encrypted value".to_string(),
+        ));
     }
     let enc_val_clean = enc_val.replace(['\n', '\r', ' '], "");
     let decoded_res = general_purpose::STANDARD
         .decode(&enc_val_clean)
         .or_else(|_| general_purpose::URL_SAFE.decode(&enc_val_clean));
 
-    match decoded_res {
-        Ok(encrypted_bytes) => {
-            if encrypted_bytes.len() >= 16 {
-                let mut iv_bytes = [0u8; 16];
-                iv_bytes.copy_from_slice(&encrypted_bytes[..16]);
-                let mut iv_block =
-                    aes::cipher::generic_array::GenericArray::from_mut_slice(&mut iv_bytes);
-                cipher_ecb.decrypt_block(&mut iv_block);
+    let encrypted_bytes = decoded_res.map_err(|e| {
+        SteamVentError::Decryption(format!("Failed to decode Base64 for {}: {}", enc_val, e))
+    })?;
 
-                let encrypted_data = &encrypted_bytes[16..];
-                if !encrypted_data.is_empty() {
-                    let mut buf = encrypted_data.to_vec();
-                    let decryptor = Decryptor::<Aes256>::new(aes_key, &iv_bytes.into());
-                    match decryptor.decrypt_padded_mut::<Pkcs7>(&mut buf) {
-                        Ok(plaintext) => {
-                            let clean_bytes = match plaintext.iter().position(|&b| b == 0) {
-                                Some(pos) => &plaintext[..pos],
-                                None => plaintext,
-                            };
-                            return Some(String::from_utf8_lossy(clean_bytes).into_owned());
-                        }
-                        Err(e) => {
-                            log::warn!("Decryption failed for {}: {:?}", enc_val, e);
-                        }
-                    }
-                }
-            }
-        }
-        Err(e) => {
-            log::warn!("Failed to decode Base64 for {}: {:?}", enc_val, e);
-        }
+    if encrypted_bytes.len() < 16 {
+        return Err(SteamVentError::Decryption(format!(
+            "Encrypted value too short for {}: {} bytes",
+            enc_val,
+            encrypted_bytes.len()
+        )));
     }
-    None
+
+    let mut iv_bytes = [0u8; 16];
+    iv_bytes.copy_from_slice(&encrypted_bytes[..16]);
+    let mut iv_block = aes::cipher::generic_array::GenericArray::from_mut_slice(&mut iv_bytes);
+    cipher_ecb.decrypt_block(&mut iv_block);
+
+    let encrypted_data = &encrypted_bytes[16..];
+    if encrypted_data.is_empty() {
+        return Err(SteamVentError::Decryption(format!(
+            "Encrypted data empty for {}",
+            enc_val
+        )));
+    }
+
+    let mut buf = encrypted_data.to_vec();
+    let decryptor = Decryptor::<Aes256>::new(&aes_key, &iv_bytes.into());
+    let plaintext = decryptor
+        .decrypt_padded_mut::<Pkcs7>(&mut buf)
+        .map_err(|e| {
+            SteamVentError::Decryption(format!("Decryption failed for {}: {}", enc_val, e))
+        })?;
+
+    let clean_bytes = match plaintext.iter().position(|&b| b == 0) {
+        Some(pos) => &plaintext[..pos],
+        None => plaintext,
+    };
+
+    Ok(String::from_utf8_lossy(clean_bytes).into_owned())
 }
 
 pub fn parse_manifest(
@@ -82,51 +90,59 @@ pub fn parse_manifest(
         let length =
             u32::from_le_bytes(payload_bytes[cursor + 4..cursor + 8].try_into().unwrap()) as usize;
 
-        log::info!(
+        tracing::debug!(
             "Found manifest segment: Magic 0x{:08X}, Length {}",
             magic,
             length
         );
 
         if cursor + 8 + length > payload_bytes.len() {
-            log::warn!(
+            tracing::error!(
                 "Segment length {} exceeds remaining data {}",
                 length,
                 payload_bytes.len() - cursor - 8
             );
-            break;
+            return Err(SteamVentError::Manifest(format!(
+                "Segment length {} exceeds remaining data {}",
+                length,
+                payload_bytes.len() - cursor - 8
+            )));
         }
 
         let segment_data = &payload_bytes[cursor + 8..cursor + 8 + length];
 
         if magic == MAGIC_PAYLOAD {
-            log::info!("Processing Payload segment...");
+            tracing::debug!("Processing Payload segment");
             final_payload.extend_from_slice(segment_data);
         } else if magic == MAGIC_METADATA_1 || magic == MAGIC_METADATA_2 {
-            log::info!("Decoding Metadata segment...");
-            match ContentManifestMetadata::parse_from_bytes(segment_data) {
-                Ok(m) => {
-                    log::info!(
-                        "Metadata: Names encrypted: {:?}, Depot ID: {:?}",
-                        m.filenames_encrypted,
-                        m.depot_id
-                    );
-                    metadata = Some(m);
-                }
-                Err(e) => log::warn!("Failed to decode Metadata segment: {}", e),
-            }
+            tracing::debug!("Decoding Metadata segment");
+            let m = ContentManifestMetadata::parse_from_bytes(segment_data).map_err(|e| {
+                SteamVentError::Manifest(format!("Failed to decode Metadata segment: {}", e))
+            })?;
+            tracing::debug!(
+                "Metadata: Names encrypted: {:?}, Depot ID: {:?}",
+                m.filenames_encrypted,
+                m.depot_id
+            );
+            metadata = Some(m);
         } else if magic == MAGIC_SIGNATURE_1 || magic == MAGIC_SIGNATURE_2 {
-            log::info!("Found Signature segment (skipping)");
+            tracing::debug!("Found Signature segment (skipping)");
         } else {
-            log::warn!("Unknown segment magic: 0x{:08X}", magic);
+            tracing::error!("Unknown segment magic: 0x{:08X}", magic);
+            return Err(SteamVentError::Manifest(format!(
+                "Unknown segment magic: 0x{:08X}",
+                magic
+            )));
         }
 
         cursor += 8 + length;
     }
 
     if final_payload.is_empty() {
-        log::warn!("No Payload segment found, using raw bytes as fallback");
-        final_payload = payload_bytes.to_vec();
+        tracing::error!("No Payload segment found, manifest is invalid");
+        return Err(SteamVentError::Manifest(
+            "No Payload segment found in manifest".to_string(),
+        ));
     }
 
     let manifest = ContentManifestPayload::parse_from_bytes(&final_payload)
@@ -150,22 +166,18 @@ pub fn decrypt_manifest_filenames(
     let cipher_ecb = Aes256::new(&aes_key);
 
     for mapping in &mut manifest.mappings {
-        // Decrypt filename
         if let Some(enc_val) = mapping.filename.as_ref() {
-            if let Some(decrypted) = decrypt_string(enc_val, &aes_key, &cipher_ecb) {
-                log::debug!("Decrypted filename: {} -> {}", enc_val, decrypted);
-                mapping.filename = Some(decrypted);
-            }
+            let decrypted = decrypt_string(enc_val, &aes_key, &cipher_ecb)?;
+            tracing::debug!("Decrypted filename: {} -> {}", enc_val, decrypted);
+            mapping.filename = Some(decrypted);
         }
 
-        // Decrypt linktarget
         if let Some(enc_val) = mapping.linktarget.as_ref() {
-            if let Some(decrypted) = decrypt_string(enc_val, &aes_key, &cipher_ecb) {
-                log::debug!("Decrypted linktarget: {} -> {}", enc_val, decrypted);
-                mapping.linktarget = Some(decrypted);
-            }
+            let decrypted = decrypt_string(enc_val, &aes_key, &cipher_ecb)?;
+            tracing::debug!("Decrypted linktarget: {} -> {}", enc_val, decrypted);
+            mapping.linktarget = Some(decrypted);
         }
     }
-    log::info!("Decryption complete.");
+    tracing::debug!("Decryption complete.");
     Ok(())
 }

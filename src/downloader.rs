@@ -96,7 +96,7 @@ impl CdnDownloader {
         depot_id: u32,
         manifest_id: u64,
     ) -> Result<u64> {
-        log::info!("Requesting manifest request code...");
+        tracing::debug!("Requesting manifest request code");
 
         let mut code_req = CContentServerDirectory_GetManifestRequestCode_Request::new();
         code_req.set_app_id(app_id);
@@ -116,7 +116,7 @@ impl CdnDownloader {
     }
 
     async fn fetch_depot_key(&mut self, app_id: u32, depot_id: u32) -> Result<Vec<u8>> {
-        log::info!("Requesting depot decryption key...");
+        tracing::debug!("Requesting depot decryption key");
 
         let mut key_req = CMsgClientGetDepotDecryptionKey::new();
         key_req.set_depot_id(depot_id);
@@ -149,7 +149,7 @@ impl CdnDownloader {
         let details = self.fetch_item_details(item_id).await?;
 
         let title = details.title.as_deref().unwrap_or("Unknown");
-        log::info!("Title: {}", title);
+        tracing::info!("Title: {}", title);
 
         let manifest_id = details.hcontent_file.ok_or_else(|| {
             SteamVentError::InvalidData("No manifest ID (hcontent_file) found".to_string())
@@ -158,13 +158,13 @@ impl CdnDownloader {
         let app_id = details.consumer_appid.unwrap_or(config_app_id);
         let depot_id = app_id;
 
-        log::info!("Manifest ID: {}", manifest_id);
-        log::info!("App/Depot ID: {}", app_id);
+        tracing::debug!("Manifest ID: {}", manifest_id);
+        tracing::debug!("App/Depot ID: {}", app_id);
 
         let mrc = self
             .fetch_manifest_request_code(app_id, depot_id, manifest_id)
             .await?;
-        log::info!("Manifest Request Code: {}", mrc);
+        tracing::debug!("Manifest Request Code: {}", mrc);
 
         let manifest_bytes = self
             .cdn_client
@@ -181,25 +181,32 @@ impl CdnDownloader {
             if m.filenames_encrypted.unwrap_or(false) {
                 need_key_for_filenames = true;
                 depot_id_for_key = m.depot_id.unwrap_or(app_id as u32);
-                log::info!("Manifest filenames are encrypted (depot_id: {}).", depot_id_for_key);
+                tracing::debug!(
+                    "Manifest filenames are encrypted (depot_id: {}).",
+                    depot_id_for_key
+                );
             }
         }
 
         // Always attempt to fetch the depot key (both for filename decryption and chunk decryption)
         match self.fetch_depot_key(app_id, depot_id_for_key).await {
             Ok(depot_key) => {
-                log::info!("Depot key received ({} bytes).", depot_key.len());
+                tracing::debug!("Depot key received ({} bytes).", depot_key.len());
                 if need_key_for_filenames {
                     crate::manifest::decrypt_manifest_filenames(&mut manifest, &depot_key)?;
-                    log::info!("Decrypted manifest filenames.");
+                    tracing::debug!("Decrypted manifest filenames.");
                 }
                 depot_key_opt = Some(depot_key);
             }
             Err(e) => {
                 if need_key_for_filenames {
-                    log::warn!("Failed to fetch depot key for filename decryption: {}. Proceeding without it.", e);
+                    tracing::error!("Failed to fetch depot key for filename decryption: {}", e);
+                    return Err(SteamVentError::Cdn(format!(
+                        "Failed to fetch depot key: {}",
+                        e
+                    )));
                 } else {
-                    log::debug!("No depot key fetched (not needed).");
+                    tracing::debug!("No depot key fetched (not needed).");
                 }
             }
         }

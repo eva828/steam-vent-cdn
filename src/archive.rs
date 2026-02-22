@@ -24,7 +24,7 @@ impl<'a> ZipArchiveExtractor<'a> {
 
 impl<'a> ArchiveExtractor for ZipArchiveExtractor<'a> {
     fn extract(&self) -> Result<Vec<u8>> {
-        log::debug!("Unzipping data...");
+        tracing::debug!("Unzipping data");
         let mut zip = zip::ZipArchive::new(Cursor::new(self.data))
             .map_err(|e| SteamVentError::Manifest(e.to_string()))?;
         let mut file = zip
@@ -51,7 +51,7 @@ impl<'a> ZstdArchiveExtractor<'a> {
 
 impl<'a> ArchiveExtractor for ZstdArchiveExtractor<'a> {
     fn extract(&self) -> Result<Vec<u8>> {
-        log::debug!("Applying Zstd decompression...");
+        tracing::debug!("Applying Zstd decompression");
         if self.data.len() <= 8 {
             return Err(SteamVentError::Cdn("Zstd chunk too small?".to_string()));
         }
@@ -80,7 +80,7 @@ impl<'a> VZaArchiveExtractor<'a> {
 
 impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
     fn extract(&self) -> Result<Vec<u8>> {
-        log::debug!("Applying VZa decompression (Steam's custom LZMA)...");
+        tracing::debug!("Applying VZa decompression (Steam's custom LZMA)");
 
         // Minimum VZa structure: 7 bytes header + 5 props + 0 compressed + 10 footer = 22
         if self.data.len() < 22 {
@@ -148,7 +148,7 @@ impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
         }
 
         if decompressed.len() == uncompressed_size {
-            log::info!(
+            tracing::debug!(
                 "VZa decompressed successfully: {} -> {}",
                 compressed_end - compressed_start,
                 decompressed.len()
@@ -179,7 +179,7 @@ impl<'a> LzmaArchiveExtractor<'a> {
 
 impl<'a> ArchiveExtractor for LzmaArchiveExtractor<'a> {
     fn extract(&self) -> Result<Vec<u8>> {
-        log::debug!("Applying LZMA decompression...");
+        tracing::debug!("Applying LZMA decompression");
         let mut reader = Cursor::new(&self.data[self.offset..]);
         let mut decompressed = Vec::new();
         lzma_rs::lzma_decompress(&mut reader, &mut decompressed)
@@ -200,7 +200,7 @@ impl<'a> RawArchiveExtractor<'a> {
 
 impl<'a> ArchiveExtractor for RawArchiveExtractor<'a> {
     fn extract(&self) -> Result<Vec<u8>> {
-        log::debug!("No compression signature found. Treating as raw data.");
+        tracing::debug!("No compression signature found, treating as raw data");
         Ok(self.data.to_vec())
     }
 }
@@ -275,10 +275,11 @@ impl<'a> SteamChunk<'a> {
                     extractor_chunk = &temp_chunk;
                 }
                 Err(e) => {
-                    log::warn!(
-                        "Chunk decryption failed, attempting to read as raw/compressed data: {}",
+                    tracing::error!("Chunk decryption failed: {}", e);
+                    return Err(SteamVentError::Decryption(format!(
+                        "Chunk decryption failed: {}",
                         e
-                    );
+                    )));
                 }
             }
         }
