@@ -8,8 +8,6 @@ pub struct ProgressManager {
     pb_decode: indicatif::ProgressBar,
     pb_write: indicatif::ProgressBar,
     start_time: Instant,
-    downloaded_bytes: u64,
-    chunk_count: u64,
 }
 
 impl ProgressManager {
@@ -79,8 +77,6 @@ impl ProgressManager {
             pb_decode,
             pb_write,
             start_time: Instant::now(),
-            downloaded_bytes: 0,
-            chunk_count: 0,
         }
     }
 
@@ -104,20 +100,6 @@ impl ProgressManager {
         self.pb_download.finish_with_message("Download complete");
         self.pb_decode.finish_with_message("Decode complete");
         self.pb_write.finish_with_message("Write complete");
-
-        let elapsed = self.start_time.elapsed();
-        let speed = if elapsed.as_secs() > 0 {
-            self.downloaded_bytes / elapsed.as_secs()
-        } else {
-            self.downloaded_bytes
-        };
-        tracing::info!(
-            "Download complete: {} bytes, {} chunks, {} seconds, {} bytes/sec",
-            self.downloaded_bytes,
-            self.chunk_count,
-            elapsed.as_secs_f32(),
-            speed
-        );
     }
 }
 
