@@ -10,8 +10,11 @@ use clap::Parser;
 use downloader::{CdnDownloader, DownloadItem};
 use error::Result;
 use futures::StreamExt;
+use indicatif::MultiProgress;
 use std::path::PathBuf;
 use tokio::io::AsyncWriteExt;
+use tracing_indicatif::IndicatifWriter;
+use tracing_indicatif::writer::Stdout;
 use tracing_subscriber::Layer;
 use tracing_subscriber::fmt::time::UtcTime;
 use tracing_subscriber::layer::SubscriberExt;
@@ -63,7 +66,7 @@ struct Args {
     verbose: bool,
 }
 
-fn setup_tracing(verbose: bool) -> tracing_appender::non_blocking::WorkerGuard {
+fn setup_tracing(verbose: bool) -> (MultiProgress, tracing_appender::non_blocking::WorkerGuard) {
     // Write logs to a file in the current directory, clearing previous contents
     let log_file = std::fs::File::create("run.log").expect("Failed to create log file");
     let (non_blocking, guard) = tracing_appender::non_blocking(log_file);
@@ -85,11 +88,14 @@ fn setup_tracing(verbose: bool) -> tracing_appender::non_blocking::WorkerGuard {
         .with_writer(non_blocking)
         .boxed();
 
+    let multi = MultiProgress::new();
+    let writer = IndicatifWriter::<Stdout>::new(multi.clone());
+
     let base_stdout = tracing_subscriber::fmt::layer()
         .with_thread_ids(false)
         .with_thread_names(false)
         .with_ansi(true)
-        .with_writer(std::io::stdout);
+        .with_writer(writer);
 
     let stdout_layer = if verbose {
         base_stdout
@@ -111,14 +117,14 @@ fn setup_tracing(verbose: bool) -> tracing_appender::non_blocking::WorkerGuard {
         .with(file_layer)
         .init();
 
-    guard
+    (multi, guard)
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    let _guard = setup_tracing(args.verbose);
+    let (multi, _guard) = setup_tracing(args.verbose);
 
     tracing::debug!("Item ID: {}", args.item_id);
 
@@ -173,6 +179,19 @@ async fn main() -> Result<()> {
         tokio::fs::create_dir_all(&output_path).await?;
     }
 
+    let total_size: u64 = files
+        .iter()
+        .map(|f| f.manifest_info.size.unwrap_or(0))
+        .sum();
+    let pb = multi.add(indicatif::ProgressBar::new(total_size));
+    pb.set_style(
+        indicatif::ProgressStyle::with_template(
+            "{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})",
+        )
+        .unwrap()
+        .progress_chars("#>-"),
+    );
+
     for file in files {
         let output_path = args
             .output
@@ -192,10 +211,12 @@ async fn main() -> Result<()> {
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result?;
             file_handle.write_all(&chunk).await?;
+            pb.inc(chunk.len() as u64);
         }
 
         tracing::info!("Downloaded: {}", file.filename);
     }
 
+    pb.finish_with_message("Download complete");
     Ok(())
 }
