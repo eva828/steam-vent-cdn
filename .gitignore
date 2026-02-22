@@ -1,7 +1,8 @@
+# Rust
 /target/
+
+# VSCode
 .history/
-.env
-/steamcmd_tool/
-/mods/
-run.log
+
+# Output
 output/
