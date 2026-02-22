@@ -30,9 +30,6 @@ struct Args {
     output: PathBuf,
 
     #[arg(short, long)]
-    filter: Option<String>,
-
-    #[arg(short, long)]
     username: Option<String>,
 
     #[arg(
@@ -126,13 +123,6 @@ async fn main() -> Result<()> {
 
     let items: Vec<DownloadItem> = manifest_files
         .into_iter()
-        .filter(|(filename, _)| {
-            if let Some(f) = &args.filter {
-                filename.ends_with(f)
-            } else {
-                true
-            }
-        })
         .map(|(filename, manifest_info)| DownloadItem {
             item_id: args.item_id,
             filename,
