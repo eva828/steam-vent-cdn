@@ -180,6 +180,31 @@ async fn main() -> Result<()> {
         files.len()
     );
 
+    if args.list {
+        tracing::info!("Workshop item {} files:", args.item_id);
+        for file in &files {
+            let size = file.manifest_info.size.unwrap_or_else(|| {
+                file.manifest_info.chunks
+                    .iter()
+                    .map(|c| c.uncompressed_size as u64)
+                    .sum()
+            });
+
+            let size_str = if size < 1024 {
+                format!("{} B", size)
+            } else if size < 1024 * 1024 {
+                format!("{:.2} KB", size as f64 / 1024.0)
+            } else {
+                format!("{:.2} MB", size as f64 / (1024.0 * 1024.0))
+            };
+
+            tracing::info!("  - {} ({})", file.filename, size_str);
+        }
+
+        tracing::info!("Total: {} files", files.len());
+        return Ok(());
+    }
+
     for dir in &directories {
         let output_path = args
             .output
