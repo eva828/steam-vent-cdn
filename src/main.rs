@@ -7,7 +7,7 @@ use steam_vent_cdn::{SteamClient, CdnDownloader};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-    let multi = cli::setup_tracing(args.verbose);
+    let multi = cli::setup_tracing(args.verbose, &args.output)?;
 
     tracing::debug!("Item ID: {}", args.item_id);
 

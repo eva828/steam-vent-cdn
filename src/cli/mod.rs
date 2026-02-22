@@ -11,8 +11,10 @@ use tracing_subscriber::Layer;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::prelude::*;
 
-pub fn setup_tracing(verbose: bool) -> MultiProgress {
-    let log_file = std::fs::File::create("run.log").expect("Failed to create log file");
+pub fn setup_tracing(verbose: bool, output_dir: &std::path::Path) -> std::result::Result<MultiProgress, Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(output_dir)?;
+    let log_path = output_dir.join("steam-vent-cdn.log");
+    let log_file = std::fs::File::create(&log_path)?;
     let (non_blocking, guard) = tracing_appender::non_blocking(log_file);
 
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
@@ -62,7 +64,7 @@ pub fn setup_tracing(verbose: bool) -> MultiProgress {
         .init();
 
     std::mem::forget(guard);
-    multi
+    Ok(multi)
 }
 
 pub fn resolve_credentials(username: Option<String>, password: Option<String>) -> Credentials {
