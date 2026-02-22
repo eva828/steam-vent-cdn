@@ -1,6 +1,6 @@
 use crate::error::{Result, SteamVentError};
-use aes::Aes256;
 use aes::cipher::{BlockDecrypt, KeyInit};
+use aes::Aes256;
 use cbc::cipher::{BlockDecryptMut, KeyIvInit};
 use std::io::{Cursor, Read};
 
@@ -24,7 +24,6 @@ impl<'a> ZipArchiveExtractor<'a> {
 
 impl<'a> ArchiveExtractor for ZipArchiveExtractor<'a> {
     fn extract(&self) -> Result<Vec<u8>> {
-        tracing::debug!("Unzipping data");
         let mut zip = zip::ZipArchive::new(Cursor::new(self.data))
             .map_err(|e| SteamVentError::Manifest(e.to_string()))?;
         let mut file = zip
@@ -33,6 +32,11 @@ impl<'a> ArchiveExtractor for ZipArchiveExtractor<'a> {
         let mut buffer = Vec::new();
         file.read_to_end(&mut buffer)
             .map_err(|e| SteamVentError::Io(e))?;
+        tracing::debug!(
+            "ZIP extracted successfully: {} bytes input -> {} bytes output",
+            self.data.len(),
+            buffer.len()
+        );
         Ok(buffer)
     }
 }
@@ -51,7 +55,6 @@ impl<'a> ZstdArchiveExtractor<'a> {
 
 impl<'a> ArchiveExtractor for ZstdArchiveExtractor<'a> {
     fn extract(&self) -> Result<Vec<u8>> {
-        tracing::debug!("Applying Zstd decompression");
         if self.data.len() <= 8 {
             return Err(SteamVentError::Cdn("Zstd chunk too small?".to_string()));
         }
@@ -62,6 +65,11 @@ impl<'a> ArchiveExtractor for ZstdArchiveExtractor<'a> {
             .single_frame();
         std::io::copy(&mut decoder, &mut decompressed)
             .map_err(|e| SteamVentError::Cdn(format!("Zstd Decompression failed (copy): {}", e)))?;
+        tracing::debug!(
+            "Zstd extracted successfully: {} bytes input -> {} bytes output",
+            self.data.len(),
+            decompressed.len()
+        );
         Ok(decompressed)
     }
 }
@@ -80,18 +88,20 @@ impl<'a> VZaArchiveExtractor<'a> {
 
 impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
     fn extract(&self) -> Result<Vec<u8>> {
-        tracing::debug!("Applying VZa decompression (Steam's custom LZMA)");
-
         // Minimum VZa structure: 7 bytes header + 5 props + 0 compressed + 10 footer = 22
         if self.data.len() < 22 {
             return Err(SteamVentError::Cdn(format!(
-                "VZa data too small ({} bytes)",
+                "VZa data too small ({} bytes, minimum required: 22 bytes)",
                 self.data.len()
             )));
         }
 
         if !self.data.starts_with(Self::MAGIC) {
-            return Err(SteamVentError::Cdn("Not VZa format".to_string()));
+            let magic_bytes = &self.data[..self.data.len().min(4)];
+            return Err(SteamVentError::Cdn(format!(
+                "Not VZa format (magic bytes: {:02X?})",
+                magic_bytes
+            )));
         }
 
         // Reserved bytes at offset 3-6 should be zero; we skip validation.
@@ -100,9 +110,12 @@ impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
         let compressed_start = 12;
         let compressed_end = self.data.len() - 10;
         if compressed_end <= compressed_start {
-            return Err(SteamVentError::Cdn(
-                "VZa compressed region empty".to_string(),
-            ));
+            return Err(SteamVentError::Cdn(format!(
+                "VZa compressed region empty (total: {} bytes, start: {}, end: {})",
+                self.data.len(),
+                compressed_start,
+                compressed_end
+            )));
         }
 
         // Verify footer ends with 'zv' (last 2 bytes)
@@ -127,6 +140,8 @@ impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
             )));
         }
 
+        let compressed_size = compressed_end - compressed_start;
+
         let mut decompressed = Vec::with_capacity(uncompressed_size);
         let mut options: lzma_rs::decompress::Options = Default::default();
         options.unpacked_size =
@@ -149,8 +164,8 @@ impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
 
         if decompressed.len() == uncompressed_size {
             tracing::debug!(
-                "VZa decompressed successfully: {} -> {}",
-                compressed_end - compressed_start,
+                "VZa extracted successfully: {} bytes input -> {} bytes output",
+                compressed_size,
                 decompressed.len()
             );
             Ok(decompressed)
@@ -179,11 +194,16 @@ impl<'a> LzmaArchiveExtractor<'a> {
 
 impl<'a> ArchiveExtractor for LzmaArchiveExtractor<'a> {
     fn extract(&self) -> Result<Vec<u8>> {
-        tracing::debug!("Applying LZMA decompression");
+        let input_size = self.data.len() - self.offset;
         let mut reader = Cursor::new(&self.data[self.offset..]);
         let mut decompressed = Vec::new();
         lzma_rs::lzma_decompress(&mut reader, &mut decompressed)
             .map_err(|e| SteamVentError::Cdn(format!("LZMA Decompression failed: {}", e)))?;
+        tracing::debug!(
+            "LZMA extracted successfully: {} bytes input -> {} bytes output",
+            input_size,
+            decompressed.len()
+        );
         Ok(decompressed)
     }
 }
@@ -200,8 +220,13 @@ impl<'a> RawArchiveExtractor<'a> {
 
 impl<'a> ArchiveExtractor for RawArchiveExtractor<'a> {
     fn extract(&self) -> Result<Vec<u8>> {
-        tracing::debug!("No compression signature found, treating as raw data");
-        Ok(self.data.to_vec())
+        let output = self.data.to_vec();
+        tracing::debug!(
+            "Raw extracted successfully: {} bytes input -> {} bytes output",
+            self.data.len(),
+            output.len()
+        );
+        Ok(output)
     }
 }
 
@@ -275,10 +300,18 @@ impl<'a> SteamChunk<'a> {
                     extractor_chunk = &temp_chunk;
                 }
                 Err(e) => {
-                    tracing::error!("Chunk decryption failed: {}", e);
+                    let magic_bytes = &self.data[..self.data.len().min(4)];
+                    tracing::error!(
+                        "Chunk decryption failed: {} (input size: {} bytes, magic bytes: {:02X?})",
+                        e,
+                        self.data.len(),
+                        magic_bytes
+                    );
                     return Err(SteamVentError::Decryption(format!(
-                        "Chunk decryption failed: {}",
-                        e
+                        "Chunk decryption failed: {} (input size: {} bytes, magic bytes: {:02X?})",
+                        e,
+                        self.data.len(),
+                        magic_bytes
                     )));
                 }
             }

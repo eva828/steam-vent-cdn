@@ -4,7 +4,6 @@ use std::sync::Arc;
 use crate::cdn::CdnClient;
 use crate::connection::{ConnectionExt, SteamSession};
 use crate::error::{Result, SteamVentError};
-use futures::stream::{self, Stream, StreamExt};
 use steam_vent::ConnectionTrait;
 use steam_vent_proto::content_manifest::ContentManifestPayload;
 use steam_vent_proto::steammessages_clientserver_2::{
@@ -15,9 +14,33 @@ use steam_vent_proto::steammessages_publishedfile_steamclient::{
     CPublishedFile_GetDetails_Request, PublishedFileDetails,
 };
 
+#[derive(Debug, Clone)]
+pub struct ChunkDownloadTask {
+    pub chunk_id: String,
+    pub depot: Arc<DepotContext>,
+    pub file_index: usize,
+    pub chunk_index: usize,
+    pub compressed_size: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompressedChunk {
+    pub depot: Arc<DepotContext>,
+    pub file_index: usize,
+    pub chunk_index: usize,
+    pub compressed_data: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DownloadedChunk {
+    pub file_index: usize,
+    pub chunk_index: usize,
+    pub data: Vec<u8>,
+}
+
 pub struct CdnDownloader {
     steam_client: SteamSession,
-    cdn_client: CdnClient,
+    pub cdn_client: CdnClient,
 }
 
 #[derive(Debug, Clone)]
@@ -36,6 +59,8 @@ pub struct DownloadManifest {
 #[derive(Debug, Clone)]
 pub struct ChunkInfo {
     pub sha: Vec<u8>,
+    pub uncompressed_size: u32,
+    pub compressed_size: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -232,10 +257,26 @@ impl CdnDownloader {
             let chunks: Vec<ChunkInfo> = mapping
                 .chunks
                 .into_iter()
-                .map(|c| ChunkInfo {
-                    sha: c.sha.unwrap_or_default(),
+                .map(|c| -> Result<ChunkInfo> {
+                    let sha = c.sha.ok_or_else(|| {
+                        SteamVentError::InvalidData("Chunk SHA is missing".to_string())
+                    })?;
+
+                    let uncompressed_size = c.cb_original.ok_or_else(|| {
+                        SteamVentError::InvalidData("Chunk cb_original is missing".to_string())
+                    })?;
+
+                    let compressed_size = c.cb_compressed.ok_or_else(|| {
+                        SteamVentError::InvalidData("Chunk cb_compressed is missing".to_string())
+                    })?;
+
+                    Ok(ChunkInfo {
+                        sha,
+                        uncompressed_size,
+                        compressed_size,
+                    })
                 })
-                .collect();
+                .collect::<Result<Vec<_>>>()?;
 
             files.insert(
                 filename,
@@ -249,33 +290,5 @@ impl CdnDownloader {
         }
 
         Ok(files)
-    }
-
-    pub async fn get_stream(
-        &self,
-        item: &DownloadItem,
-    ) -> Result<impl Stream<Item = Result<Vec<u8>>> + '_> {
-        let depot = Arc::clone(&item.manifest_info.depot);
-        let chunks: Vec<ChunkInfo> = item.manifest_info.chunks.clone();
-
-        let concurrent_downloads = self.steam_client.config().concurrent_downloads;
-
-        Ok(stream::iter(chunks)
-            .map(move |chunk| {
-                let depot = Arc::clone(&depot);
-                let cdn_client = self.cdn_client.clone();
-                async move {
-                    let chunk_id = hex::encode(chunk.sha);
-                    cdn_client
-                        .download_chunk(
-                            &depot.server_hosts,
-                            depot.depot_id,
-                            &chunk_id,
-                            depot.depot_key.as_deref(),
-                        )
-                        .await
-                }
-            })
-            .buffered(concurrent_downloads))
     }
 }

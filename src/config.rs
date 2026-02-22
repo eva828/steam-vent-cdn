@@ -32,7 +32,8 @@ pub struct DownloaderConfig {
     pub max_retries: u32,
     pub retry_delay: Duration,
     pub app_id: u32,
-    pub concurrent_downloads: usize,
+    pub parallel_download: usize,
+    pub parallel_decode: usize,
 }
 
 impl Default for DownloaderConfig {
@@ -43,7 +44,8 @@ impl Default for DownloaderConfig {
             max_retries: 3,
             retry_delay: Duration::from_secs(1),
             app_id: 1281930,
-            concurrent_downloads: 8,
+            parallel_download: 16,
+            parallel_decode: 8,
         }
     }
 }
@@ -61,8 +63,13 @@ impl DownloaderConfig {
         self
     }
 
-    pub fn with_concurrent_downloads(mut self, concurrent_downloads: usize) -> Self {
-        self.concurrent_downloads = concurrent_downloads;
+    pub fn with_parallel_download(mut self, parallel_download: usize) -> Self {
+        self.parallel_download = parallel_download;
+        self
+    }
+
+    pub fn with_parallel_decode(mut self, parallel_decode: usize) -> Self {
+        self.parallel_decode = parallel_decode;
         self
     }
 }

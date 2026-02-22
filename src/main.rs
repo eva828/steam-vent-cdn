@@ -7,12 +7,16 @@ mod error;
 mod manifest;
 
 use clap::Parser;
-use downloader::{CdnDownloader, DownloadItem};
+use downloader::{CdnDownloader, DownloadItem, ChunkDownloadTask, CompressedChunk, DownloadedChunk};
+use crate::cdn::CdnClient;
 use error::Result;
-use futures::StreamExt;
 use indicatif::MultiProgress;
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
+use tokio::sync::{Mutex, mpsc, Semaphore};
 use tracing_indicatif::IndicatifWriter;
 use tracing_indicatif::writer::Stdout;
 use tracing_subscriber::Layer;
@@ -55,12 +59,18 @@ struct Args {
     list: bool,
 
     #[arg(
-        short = 'c',
+        long,
+        default_value_t = 16,
+        help = "Parallel download connections"
+    )]
+    parallel_download: usize,
+
+    #[arg(
         long,
         default_value_t = 8,
-        help = "The number of concurrent downloads"
+        help = "Parallel decode workers"
     )]
-    concurrent_downloads: usize,
+    parallel_decode: usize,
 
     #[arg(short, long, help = "Enable verbose output")]
     verbose: bool,
@@ -131,7 +141,8 @@ async fn main() -> Result<()> {
     let credentials = crate::config::Credentials::from_options(args.username, args.password);
     let config = crate::config::DownloaderConfig::new(credentials)
         .with_app_id(args.app_id)
-        .with_concurrent_downloads(args.concurrent_downloads);
+        .with_parallel_download(args.parallel_download)
+        .with_parallel_decode(args.parallel_decode);
 
     let steam_client = crate::connection::SteamClient::new(config);
 
@@ -179,20 +190,65 @@ async fn main() -> Result<()> {
         tokio::fs::create_dir_all(&output_path).await?;
     }
 
-    let total_size: u64 = files
+    let total_compressed: u64 = files
         .iter()
-        .map(|f| f.manifest_info.size.unwrap_or(0))
+        .map(|f| {
+            f.manifest_info.chunks
+                .iter()
+                .map(|c| c.compressed_size as u64)
+                .sum::<u64>()
+        })
         .sum();
-    let pb = multi.add(indicatif::ProgressBar::new(total_size));
-    pb.set_style(
+
+    let total_decompressed: u64 = files
+        .iter()
+        .map(|f| {
+            f.manifest_info.chunks
+                .iter()
+                .map(|c| c.uncompressed_size as u64)
+                .sum::<u64>()
+        })
+        .sum();
+
+    tracing::info!(
+        "Total sizes: {} compressed ({} MiB), {} decompressed ({} MiB)",
+        total_compressed,
+        total_compressed / 1024 / 1024,
+        total_decompressed,
+        total_decompressed / 1024 / 1024
+    );
+
+    let pb_download = multi.add(indicatif::ProgressBar::new(total_compressed));
+    pb_download.set_style(
         indicatif::ProgressStyle::with_template(
-            "{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})",
+            "{spinner:.blue} Downloading [{elapsed_precise}] [{wide_bar:.blue/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})",
         )
         .unwrap()
         .progress_chars("#>-"),
     );
+    pb_download.enable_steady_tick(std::time::Duration::from_millis(100));
 
-    for file in files {
+    let pb_decode = multi.add(indicatif::ProgressBar::new(total_decompressed));
+    pb_decode.set_style(
+        indicatif::ProgressStyle::with_template(
+            "{spinner:.green} Decoding [{elapsed_precise}] [{wide_bar:.green/green}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})",
+        )
+        .unwrap()
+        .progress_chars("#>-"),
+    );
+    pb_decode.enable_steady_tick(std::time::Duration::from_millis(100));
+
+    let pb_write = multi.add(indicatif::ProgressBar::new(total_decompressed));
+    pb_write.set_style(
+        indicatif::ProgressStyle::with_template(
+            "{spinner:.yellow} Writing [{elapsed_precise}] [{wide_bar:.yellow/yellow}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})",
+        )
+        .unwrap()
+        .progress_chars("#>-"),
+    );
+    pb_write.enable_steady_tick(std::time::Duration::from_millis(100));
+
+    for file in &files {
         let output_path = args
             .output
             .join(args.app_id.to_string())
@@ -202,21 +258,213 @@ async fn main() -> Result<()> {
         if let Some(parent) = output_path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
-
-        let stream = downloader.get_stream(&file).await?;
-        tokio::pin!(stream);
-
-        let mut file_handle = tokio::fs::File::create(&output_path).await?;
-
-        while let Some(chunk_result) = stream.next().await {
-            let chunk = chunk_result?;
-            file_handle.write_all(&chunk).await?;
-            pb.inc(chunk.len() as u64);
-        }
-
-        tracing::info!("Downloaded: {}", file.filename);
     }
 
-    pb.finish_with_message("Download complete");
+    let start_time = std::time::Instant::now();
+    let mut downloaded_bytes: u64 = 0;
+    let mut chunk_count: u64 = 0;
+
+    let base_path = args
+        .output
+        .join(args.app_id.to_string())
+        .join(args.item_id.to_string());
+
+    let mut tasks: Vec<ChunkDownloadTask> = Vec::new();
+    for (file_index, file) in files.iter().enumerate() {
+        let depot = Arc::clone(&file.manifest_info.depot);
+        for (chunk_index, chunk) in file.manifest_info.chunks.iter().enumerate() {
+            tasks.push(ChunkDownloadTask {
+                chunk_id: hex::encode(&chunk.sha),
+                depot: Arc::clone(&depot),
+                file_index,
+                chunk_index,
+                compressed_size: chunk.compressed_size,
+            });
+        }
+    }
+
+    let download_sem = Arc::new(Semaphore::new(args.parallel_download));
+    let decode_sem = Arc::new(Semaphore::new(args.parallel_decode));
+
+    let (download_tx, download_rx) = mpsc::channel::<Result<CompressedChunk>>(32);
+    let (decode_tx, mut decode_rx) = mpsc::channel::<Result<DownloadedChunk>>(32);
+
+    let cdn_client = downloader.cdn_client.clone();
+
+    for task in tasks {
+        let download_sem = download_sem.clone();
+        let download_tx = download_tx.clone();
+        let cdn_client = cdn_client.clone();
+        let pb_download = pb_download.clone();
+
+        tokio::spawn(async move {
+            let _permit = download_sem.acquire().await.unwrap();
+            let compressed_data = cdn_client
+                .download_chunk(
+                    &task.depot.server_hosts,
+                    task.depot.depot_id,
+                    &task.chunk_id,
+                )
+                .await;
+
+            match compressed_data {
+                Ok(data) => {
+                    pb_download.inc(task.compressed_size as u64);
+                    let _ = download_tx.send(Ok(CompressedChunk {
+                        depot: task.depot,
+                        file_index: task.file_index,
+                        chunk_index: task.chunk_index,
+                        compressed_data: data,
+                    })).await;
+                }
+                Err(e) => {
+                    let _ = download_tx.send(Err(e)).await;
+                }
+            }
+        });
+    }
+
+    let download_rx = Arc::new(Mutex::new(download_rx));
+    let decode_sem_clone = decode_sem.clone();
+    let decode_tx_clone = decode_tx.clone();
+    let pb_decode_clone = pb_decode.clone();
+
+    tokio::spawn(async move {
+        loop {
+            let mut rx = download_rx.lock().await;
+            match rx.recv().await {
+                Some(Ok(compressed)) => {
+                    drop(rx);
+                    let _permit = decode_sem_clone.acquire().await.unwrap();
+                    let decode_tx = decode_tx_clone.clone();
+                    let pb_decode = pb_decode_clone.clone();
+
+                    tokio::spawn(async move {
+                        let depot_key = compressed.depot.depot_key.as_deref();
+                        let decoded: Result<Vec<u8>> = CdnClient::decode_chunk(&compressed.compressed_data, depot_key);
+
+                        match decoded {
+                            Ok(data) => {
+                                pb_decode.inc(data.len() as u64);
+                                let _ = decode_tx.send(Ok(DownloadedChunk {
+                                    file_index: compressed.file_index,
+                                    chunk_index: compressed.chunk_index,
+                                    data,
+                                })).await;
+                            }
+                            Err(e) => {
+                                let _ = decode_tx.send(Err(e)).await;
+                            }
+                        }
+                    });
+                }
+                Some(Err(e)) => {
+                    let _ = decode_tx.send(Err(e)).await;
+                }
+                None => break,
+            }
+        }
+    });
+
+    drop(download_tx);
+
+    let chunk_buffers: Arc<Mutex<HashMap<usize, Vec<(usize, Vec<u8>)>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+
+    while let Some(result) = decode_rx.recv().await {
+        match result {
+            Ok(chunk) => {
+                pb_write.inc(chunk.data.len() as u64);
+                downloaded_bytes += chunk.data.len() as u64;
+                chunk_count += 1;
+
+                let mut buffers = chunk_buffers.lock().await;
+                buffers
+                    .entry(chunk.file_index)
+                    .or_insert_with(Vec::new)
+                    .push((chunk.chunk_index, chunk.data));
+
+                let file = &files[chunk.file_index];
+                let total_chunks = file.manifest_info.chunks.len();
+
+                if chunk_count % 100 == 0 {
+                    let elapsed = start_time.elapsed();
+                    let speed = if elapsed.as_secs() > 0 {
+                        downloaded_bytes / elapsed.as_secs()
+                    } else {
+                        downloaded_bytes
+                    };
+                    tracing::debug!(
+                        "Progress: {} chunks ({} bytes), speed: {} bytes/sec",
+                        chunk_count,
+                        downloaded_bytes,
+                        speed
+                    );
+                }
+
+                if let Some(chunks) = buffers.get(&chunk.file_index) {
+                    if chunks.len() == total_chunks {
+                        let file_path = base_path.join(&file.filename);
+                        let mut file_data: Vec<(usize, Vec<u8>)> = chunks.clone();
+                        file_data.sort_by_key(|(idx, _)| *idx);
+
+                        let mut full_data = Vec::new();
+                        for (_, data) in file_data {
+                            full_data.extend(data);
+                        }
+
+                        buffers.remove(&chunk.file_index);
+
+                        let output_path = file_path.clone();
+                        tokio::spawn(async move {
+                            let mut file_handle = File::create(&output_path).await.unwrap();
+                            file_handle.write_all(&full_data).await.unwrap();
+                            tracing::info!("Completed file: {} ({} bytes)", output_path.display(), full_data.len());
+                        });
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!("Error: {}", e);
+            }
+        }
+    }
+
+    for (file_index, buffers) in chunk_buffers.lock().await.iter() {
+        if !buffers.is_empty() {
+            let file = &files[*file_index];
+            let file_path = base_path.join(&file.filename);
+            let mut file_data: Vec<(usize, Vec<u8>)> = buffers.clone();
+            file_data.sort_by_key(|(idx, _)| *idx);
+
+            let mut full_data = Vec::new();
+            for (_, data) in file_data {
+                full_data.extend(data);
+            }
+
+            let mut file_handle = File::create(&file_path).await?;
+            file_handle.write_all(&full_data).await?;
+            tracing::info!("Completed file: {} ({} bytes)", file_path.display(), full_data.len());
+        }
+    }
+
+    pb_download.finish_with_message("Download complete");
+    pb_decode.finish_with_message("Decode complete");
+    pb_write.finish_with_message("Write complete");
+
+    let elapsed = start_time.elapsed();
+    let speed = if elapsed.as_secs() > 0 {
+        downloaded_bytes / elapsed.as_secs()
+    } else {
+        downloaded_bytes
+    };
+    tracing::info!(
+        "Download complete: {} bytes, {} chunks, {} seconds, {} bytes/sec",
+        downloaded_bytes,
+        chunk_count,
+        elapsed.as_secs_f32(),
+        speed
+    );
+
     Ok(())
 }

@@ -16,6 +16,7 @@ impl CdnClient {
         Self {
             http_client: HttpClient::builder()
                 .timeout(config.timeout)
+                .http2_prior_knowledge()
                 .build()
                 .unwrap_or_else(|_| HttpClient::new()),
             cdn_hosts: Vec::new(),
@@ -71,18 +72,32 @@ impl CdnClient {
             tracing::debug!("Downloading manifest from {}", manifest_url);
 
             let fetch_result = async {
-                self.http_client
-                    .get(&manifest_url)
-                    .send()
-                    .await?
-                    .error_for_status()?
-                    .bytes()
-                    .await
+                let resp = self.http_client.get(&manifest_url).send().await?;
+
+                if !resp.status().is_success() {
+                    let status = resp.status();
+                    let headers = resp.headers().clone();
+                    let body_bytes = resp.bytes().await.unwrap_or_default();
+                    let body_preview = String::from_utf8_lossy(&body_bytes[..body_bytes.len().min(256)]);
+                    return Err(SteamVentError::Cdn(format!(
+                        "HTTP {} - Headers: {:?} - Body: {}",
+                        status,
+                        headers
+                            .into_iter()
+                            .filter_map(|(k, v)| v.to_str().ok().map(|v| (k.map(|k| k.as_str().to_string()).unwrap_or_default(), v.to_string())))
+                            .collect::<Vec<_>>(),
+                        body_preview
+                    )));
+                }
+                resp.bytes().await.map_err(SteamVentError::from)
             }
             .await;
 
             match fetch_result {
-                Ok(b) => return Ok(b.to_vec()),
+                Ok(b) => {
+                    tracing::info!("Downloaded manifest from {} ({} bytes)", server_host, b.len());
+                    return Ok(b.to_vec());
+                }
                 Err(e) => {
                     tracing::warn!("Failed to fetch manifest from {}: {}", server_host, e);
                 }
@@ -98,7 +113,6 @@ impl CdnClient {
         server_hosts: &[String],
         depot_id: u32,
         chunk_id: &str,
-        depot_key: Option<&[u8]>,
     ) -> Result<Vec<u8>> {
         if server_hosts.is_empty() {
             return Err(SteamVentError::Cdn("No CDN servers available".to_string()));
@@ -114,29 +128,45 @@ impl CdnClient {
                 server_host, depot_id, chunk_id
             );
 
+            tracing::debug!(
+                "Attempting chunk {} from {} (attempt {}/{})",
+                chunk_id,
+                server_host,
+                retry_count + 1,
+                max_attempts
+            );
+
             let mut should_sleep = true;
 
             match self.http_client.get(&chunk_url).send().await {
                 Ok(resp) if resp.status().is_success() => {
                     let data = resp.bytes().await?;
-                    match crate::archive::SteamChunk::new(&data).decode(depot_key) {
-                        Ok(decoded) => return Ok(decoded),
-                        Err(e) => {
-                            tracing::error!("Chunk decoding failed for {}: {}", chunk_id, e);
-                            return Err(SteamVentError::Decryption(format!(
-                                "Chunk {} decode failed: {}",
-                                chunk_id, e
-                            )));
-                        }
-                    }
+                    tracing::debug!(
+                        "Downloaded chunk {} from {} (compressed: {} bytes)",
+                        chunk_id,
+                        server_host,
+                        data.len()
+                    );
+                    return Ok(data.to_vec());
                 }
                 Ok(resp) => {
                     let status = resp.status();
+                    let headers = resp.headers().clone();
+                    let body_bytes = resp.bytes().await.unwrap_or_default();
+                    let body_preview = String::from_utf8_lossy(&body_bytes[..body_bytes.len().min(256)]);
+
                     tracing::warn!(
-                        "Retrying chunk {} from {} (status: {})",
+                        "Retrying chunk {} from {} (attempt {}/{}, status: {}, headers: {:?}, body: {})",
                         chunk_id,
                         server_host,
-                        status
+                        retry_count + 1,
+                        max_attempts,
+                        status,
+                        headers
+                            .into_iter()
+                            .filter_map(|(k, v)| v.to_str().ok().map(|v| (k.map(|k| k.as_str().to_string()).unwrap_or_default(), v.to_string())))
+                            .collect::<Vec<_>>(),
+                        body_preview
                     );
                     if status == reqwest::StatusCode::NOT_FOUND
                         || status == reqwest::StatusCode::FORBIDDEN
@@ -145,10 +175,23 @@ impl CdnClient {
                     }
                 }
                 Err(e) => {
+                    let error_kind = if e.is_timeout() {
+                        "timeout"
+                    } else if e.is_connect() {
+                        "connection"
+                    } else if e.is_request() {
+                        "request"
+                    } else {
+                        "network"
+                    };
+
                     tracing::warn!(
-                        "Retrying chunk {} from {}: error {}",
+                        "Retrying chunk {} from {} (attempt {}/{}, error kind: {}, error: {})",
                         chunk_id,
                         server_host,
+                        retry_count + 1,
+                        max_attempts,
+                        error_kind,
                         e
                     );
                 }
@@ -157,14 +200,25 @@ impl CdnClient {
             if retry_count < max_attempts {
                 retry_count += 1;
                 if should_sleep {
+                    let delay_ms = self.config.retry_delay.as_millis();
+                    tracing::debug!(
+                        "Waiting {}ms before retry {} for chunk {}",
+                        delay_ms,
+                        retry_count + 1,
+                        chunk_id
+                    );
                     tokio::time::sleep(self.config.retry_delay).await;
                 }
             } else {
                 return Err(SteamVentError::Cdn(format!(
-                    "Failed to download chunk {} after {} attempts",
-                    chunk_id, max_attempts
+                    "Failed to download chunk {} after {} attempts (tried {} servers)",
+                    chunk_id, max_attempts, server_hosts.len()
                 )));
             }
         }
+    }
+
+    pub fn decode_chunk(compressed_data: &[u8], depot_key: Option<&[u8]>) -> Result<Vec<u8>> {
+        crate::archive::SteamChunk::new(compressed_data).decode(depot_key)
     }
 }
