@@ -45,31 +45,34 @@ impl ProgressManager {
         let pb_download = multi.add(indicatif::ProgressBar::new(total_compressed));
         pb_download.set_style(
             indicatif::ProgressStyle::with_template(
-                "{spinner:.blue} Downloading [{elapsed_precise}] [{wide_bar:.blue/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})",
+                "{spinner:.blue} {msg:<11} [{elapsed_precise}] [{wide_bar:.blue/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})",
             )
             .unwrap()
             .progress_chars("#>-"),
         );
+        pb_download.set_message("Downloading");
         pb_download.enable_steady_tick(std::time::Duration::from_millis(100));
 
         let pb_decode = multi.add(indicatif::ProgressBar::new(total_decompressed));
         pb_decode.set_style(
             indicatif::ProgressStyle::with_template(
-                "{spinner:.green} Decoding [{elapsed_precise}] [{wide_bar:.green/green}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})",
+                "{spinner:.green} {msg:<11} [{elapsed_precise}] [{wide_bar:.green/green}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})",
             )
             .unwrap()
             .progress_chars("#>-"),
         );
+        pb_decode.set_message("Decoding");
         pb_decode.enable_steady_tick(std::time::Duration::from_millis(100));
 
         let pb_write = multi.add(indicatif::ProgressBar::new(total_decompressed));
         pb_write.set_style(
             indicatif::ProgressStyle::with_template(
-                "{spinner:.yellow} Writing [{elapsed_precise}] [{wide_bar:.yellow/yellow}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})",
+                "{spinner:.yellow} {msg:<11} [{elapsed_precise}] [{wide_bar:.yellow/yellow}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})",
             )
             .unwrap()
             .progress_chars("#>-"),
         );
+        pb_write.set_message("Writing");
         pb_write.enable_steady_tick(std::time::Duration::from_millis(100));
 
         Self {
