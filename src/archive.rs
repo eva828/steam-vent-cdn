@@ -15,6 +15,8 @@ pub struct ZipArchiveExtractor<'a> {
 }
 
 impl<'a> ZipArchiveExtractor<'a> {
+    pub const MAGIC: &'static [u8] = b"PK\x03\x04";
+
     pub fn new(data: &'a [u8]) -> Result<Self> {
         Ok(Self { data })
     }
@@ -40,6 +42,8 @@ pub struct ZstdArchiveExtractor<'a> {
 }
 
 impl<'a> ZstdArchiveExtractor<'a> {
+    pub const MAGIC: &'static [u8] = b"VSZa";
+
     pub fn new(data: &'a [u8]) -> Result<Self> {
         Ok(Self { data })
     }
@@ -62,12 +66,112 @@ impl<'a> ArchiveExtractor for ZstdArchiveExtractor<'a> {
     }
 }
 
+pub struct VZaArchiveExtractor<'a> {
+    data: &'a [u8],
+}
+
+impl<'a> VZaArchiveExtractor<'a> {
+    pub const MAGIC: &'static [u8] = b"VZa";
+
+    pub fn new(data: &'a [u8]) -> Result<Self> {
+        Ok(Self { data })
+    }
+}
+
+impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
+    fn extract(&self) -> Result<Vec<u8>> {
+        log::debug!("Applying VZa decompression (Steam's custom LZMA)...");
+
+        // Minimum VZa structure: 7 bytes header + 5 props + 0 compressed + 10 footer = 22
+        if self.data.len() < 22 {
+            return Err(SteamVentError::Cdn(format!(
+                "VZa data too small ({} bytes)",
+                self.data.len()
+            )));
+        }
+
+        if !self.data.starts_with(Self::MAGIC) {
+            return Err(SteamVentError::Cdn("Not VZa format".to_string()));
+        }
+
+        // Reserved bytes at offset 3-6 should be zero; we skip validation.
+
+        // Compressed data: from offset 12 to len - 10
+        let compressed_start = 12;
+        let compressed_end = self.data.len() - 10;
+        if compressed_end <= compressed_start {
+            return Err(SteamVentError::Cdn(
+                "VZa compressed region empty".to_string(),
+            ));
+        }
+
+        // Verify footer ends with 'zv' (last 2 bytes)
+        let footer_zv = &self.data[self.data.len() - 2..];
+        if footer_zv != b"zv" {
+            return Err(SteamVentError::Cdn(format!(
+                "VZa footer does not end with 'zv': {:02X?}",
+                footer_zv
+            )));
+        }
+
+        // Uncompressed size from footer: bytes [len-6..len-2] (little endian)
+        let uncompressed_size_bytes = &self.data[self.data.len() - 6..self.data.len() - 2];
+        let uncompressed_size =
+            u32::from_le_bytes(uncompressed_size_bytes.try_into().unwrap_or([0; 4])) as usize;
+
+        // If size is zero or unreasonably large, fallback to raw
+        if uncompressed_size == 0 || uncompressed_size > 100_000_000 {
+            return Err(SteamVentError::Cdn(format!(
+                "Suspicious uncompressed size {} (max 100MB)",
+                uncompressed_size
+            )));
+        }
+
+        let mut decompressed = Vec::with_capacity(uncompressed_size);
+        let mut options: lzma_rs::decompress::Options = Default::default();
+        options.unpacked_size =
+            lzma_rs::decompress::UnpackedSize::UseProvided(Some(uncompressed_size as u64));
+
+        // In VZa format, the properties and dictionary size (5 bytes) are at offset 7,
+        // followed immediately by the compressed stream at offset 12.
+        // We can pass this contiguous slice directly to the decompressor with the
+        // uncompressed size set in options, entirely avoiding `std::io::Chain`.
+        let mut reader = Cursor::new(&self.data[7..compressed_end]);
+
+        if let Err(e) =
+            lzma_rs::lzma_decompress_with_options(&mut reader, &mut decompressed, &options)
+        {
+            return Err(SteamVentError::Cdn(format!(
+                "VZa lzma_decompress failed: {}",
+                e
+            )));
+        }
+
+        if decompressed.len() == uncompressed_size {
+            log::info!(
+                "VZa decompressed successfully: {} -> {}",
+                compressed_end - compressed_start,
+                decompressed.len()
+            );
+            Ok(decompressed)
+        } else {
+            return Err(SteamVentError::Cdn(format!(
+                "VZa decode incomplete: written={}, expected={}",
+                decompressed.len(),
+                uncompressed_size
+            )));
+        }
+    }
+}
+
 pub struct LzmaArchiveExtractor<'a> {
     data: &'a [u8],
     offset: usize,
 }
 
 impl<'a> LzmaArchiveExtractor<'a> {
+    pub const MAGIC: &'static [u8] = &[0x5D, 0x00, 0x00, 0x80, 0x00];
+
     pub fn new(data: &'a [u8], offset: usize) -> Result<Self> {
         Ok(Self { data, offset })
     }
@@ -141,20 +245,20 @@ impl<'a> SteamChunk<'a> {
     }
 
     pub fn get_extractor(&self) -> Result<Box<dyn ArchiveExtractor + 'a>> {
-        if self.data.starts_with(b"PK\x03\x04") {
-            Ok(Box::new(ZipArchiveExtractor::new(self.data)?))
-        } else if self.data.starts_with(b"VSZa") {
-            Ok(Box::new(ZstdArchiveExtractor::new(self.data)?))
-        } else if self.data.starts_with(&[0x5D, 0x00, 0x00, 0x80, 0x00]) {
-            Ok(Box::new(LzmaArchiveExtractor::new(self.data, 0)?))
-        } else if let Some(pos) = self
-            .data
-            .windows(5)
-            .position(|w| w == [0x5D, 0x00, 0x00, 0x80, 0x00])
-        {
-            Ok(Box::new(LzmaArchiveExtractor::new(self.data, pos)?))
-        } else {
-            Ok(Box::new(RawArchiveExtractor::new(self.data)?))
+        match self.data {
+            d if d.starts_with(ZipArchiveExtractor::MAGIC) => {
+                Ok(Box::new(ZipArchiveExtractor::new(d)?))
+            }
+            d if d.starts_with(ZstdArchiveExtractor::MAGIC) => {
+                Ok(Box::new(ZstdArchiveExtractor::new(d)?))
+            }
+            d if d.starts_with(VZaArchiveExtractor::MAGIC) => {
+                Ok(Box::new(VZaArchiveExtractor::new(d)?))
+            }
+            d if d.starts_with(LzmaArchiveExtractor::MAGIC) => {
+                Ok(Box::new(LzmaArchiveExtractor::new(d, 0)?))
+            }
+            d => Ok(Box::new(RawArchiveExtractor::new(d)?)),
         }
     }
 

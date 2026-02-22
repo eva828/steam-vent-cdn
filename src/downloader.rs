@@ -174,18 +174,33 @@ impl CdnDownloader {
         let (mut manifest, metadata) = crate::manifest::parse_manifest(&manifest_bytes)?;
 
         let mut depot_key_opt = None;
+        let mut need_key_for_filenames = false;
+        let mut depot_id_for_key = app_id as u32;
+
         if let Some(ref m) = metadata {
             if m.filenames_encrypted.unwrap_or(false) {
-                log::info!("Manifest filenames are encrypted.");
-                let depot_id_actual = m.depot_id.unwrap_or(app_id as u32);
-                let depot_key = self.fetch_depot_key(app_id, depot_id_actual).await?;
+                need_key_for_filenames = true;
+                depot_id_for_key = m.depot_id.unwrap_or(app_id as u32);
+                log::info!("Manifest filenames are encrypted (depot_id: {}).", depot_id_for_key);
+            }
+        }
 
-                log::info!(
-                    "Depot key received ({} bytes). Decrypting filenames...",
-                    depot_key.len()
-                );
-                crate::manifest::decrypt_manifest_filenames(&mut manifest, &depot_key)?;
+        // Always attempt to fetch the depot key (both for filename decryption and chunk decryption)
+        match self.fetch_depot_key(app_id, depot_id_for_key).await {
+            Ok(depot_key) => {
+                log::info!("Depot key received ({} bytes).", depot_key.len());
+                if need_key_for_filenames {
+                    crate::manifest::decrypt_manifest_filenames(&mut manifest, &depot_key)?;
+                    log::info!("Decrypted manifest filenames.");
+                }
                 depot_key_opt = Some(depot_key);
+            }
+            Err(e) => {
+                if need_key_for_filenames {
+                    log::warn!("Failed to fetch depot key for filename decryption: {}. Proceeding without it.", e);
+                } else {
+                    log::debug!("No depot key fetched (not needed).");
+                }
             }
         }
 
