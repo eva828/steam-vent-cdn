@@ -147,7 +147,11 @@ async fn main() -> Result<()> {
     log::info!("Found {} files to download.", items.len());
 
     for item in items {
-        let output_path = args.output.join(&item.filename);
+        let output_path = args
+            .output
+            .join(args.app_id.to_string())
+            .join(args.item_id.to_string())
+            .join(&item.filename);
 
         if let Some(parent) = output_path.parent() {
             tokio::fs::create_dir_all(parent).await?;
