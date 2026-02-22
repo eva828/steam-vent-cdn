@@ -111,16 +111,7 @@ async fn main() -> Result<()> {
 
     tracing::debug!("Item ID: {}", args.item_id);
 
-    let credentials = match (args.username, args.password) {
-        (Some(username), Some(password)) => {
-            crate::config::Credentials::UserPass { username, password }
-        }
-        (Some(username), None) => {
-            let password = rpassword::prompt_password("Password: ").unwrap_or_default();
-            crate::config::Credentials::UserPass { username, password }
-        }
-        _ => crate::config::Credentials::Anonymous,
-    };
+    let credentials = crate::config::Credentials::from_options(args.username, args.password);
     let config = crate::config::DownloaderConfig::new(credentials)
         .with_app_id(args.app_id)
         .with_concurrent_downloads(args.concurrent_downloads);

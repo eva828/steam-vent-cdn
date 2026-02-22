@@ -12,6 +12,19 @@ impl Default for Credentials {
     }
 }
 
+impl Credentials {
+    pub fn from_options(username: Option<String>, password: Option<String>) -> Self {
+        match (username, password) {
+            (Some(username), Some(password)) => Self::UserPass { username, password },
+            (Some(username), None) => {
+                let password = rpassword::prompt_password("Password: ").unwrap_or_default();
+                Self::UserPass { username, password }
+            }
+            _ => Self::Anonymous,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DownloaderConfig {
     pub credentials: Credentials,
