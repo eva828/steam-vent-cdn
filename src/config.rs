@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum Credentials {
     Anonymous,
     UserPass { username: String, password: String },
@@ -12,37 +12,37 @@ impl Default for Credentials {
     }
 }
 
-impl Credentials {
-    pub fn from_options(username: Option<String>, password: Option<String>) -> Self {
-        match (username, password) {
-            (Some(username), Some(password)) => Self::UserPass { username, password },
-            (Some(username), None) => {
-                let password = rpassword::prompt_password("Password: ").unwrap_or_default();
-                Self::UserPass { username, password }
-            }
-            _ => Self::Anonymous,
+#[derive(Debug, Clone)]
+pub struct RetryPolicy {
+    pub max_retries: u32,
+    pub retry_delay: Duration,
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self {
+            max_retries: 3,
+            retry_delay: Duration::from_secs(1),
         }
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct DownloaderConfig {
+#[derive(Clone)]
+pub struct Config {
     pub credentials: Credentials,
     pub timeout: Duration,
-    pub max_retries: u32,
-    pub retry_delay: Duration,
+    pub retry_policy: RetryPolicy,
     pub app_id: u32,
     pub parallel_download: usize,
     pub parallel_decode: usize,
 }
 
-impl Default for DownloaderConfig {
+impl Default for Config {
     fn default() -> Self {
         Self {
             credentials: Credentials::default(),
             timeout: Duration::from_secs(30),
-            max_retries: 3,
-            retry_delay: Duration::from_secs(1),
+            retry_policy: RetryPolicy::default(),
             app_id: 1281930,
             parallel_download: 16,
             parallel_decode: 8,
@@ -50,26 +50,60 @@ impl Default for DownloaderConfig {
     }
 }
 
-impl DownloaderConfig {
-    pub fn new(credentials: Credentials) -> Self {
+pub struct ConfigBuilder {
+    config: Config,
+}
+
+impl Default for ConfigBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ConfigBuilder {
+    pub fn new() -> Self {
         Self {
-            credentials,
-            ..Default::default()
+            config: Config::default(),
         }
     }
 
-    pub fn with_app_id(mut self, app_id: u32) -> Self {
-        self.app_id = app_id;
+    pub fn credentials(mut self, credentials: Credentials) -> Self {
+        self.config.credentials = credentials;
         self
     }
 
-    pub fn with_parallel_download(mut self, parallel_download: usize) -> Self {
-        self.parallel_download = parallel_download;
+    pub fn app_id(mut self, app_id: u32) -> Self {
+        self.config.app_id = app_id;
         self
     }
 
-    pub fn with_parallel_decode(mut self, parallel_decode: usize) -> Self {
-        self.parallel_decode = parallel_decode;
+    pub fn parallel_download(mut self, parallel_download: usize) -> Self {
+        self.config.parallel_download = parallel_download;
         self
+    }
+
+    pub fn parallel_decode(mut self, parallel_decode: usize) -> Self {
+        self.config.parallel_decode = parallel_decode;
+        self
+    }
+
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.config.timeout = timeout;
+        self
+    }
+
+    pub fn retry_policy(mut self, retry_policy: RetryPolicy) -> Self {
+        self.config.retry_policy = retry_policy;
+        self
+    }
+
+    pub fn build(self) -> Config {
+        self.config
+    }
+}
+
+impl Config {
+    pub fn builder() -> ConfigBuilder {
+        ConfigBuilder::new()
     }
 }

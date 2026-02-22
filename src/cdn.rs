@@ -1,4 +1,4 @@
-use crate::config::DownloaderConfig;
+use crate::config::Config;
 use crate::connection::ConnectionExt;
 use crate::error::{Result, SteamVentError};
 use reqwest::Client as HttpClient;
@@ -8,11 +8,11 @@ use steam_vent_proto::steammessages_contentsystem_steamclient::CContentServerDir
 pub struct CdnClient {
     http_client: HttpClient,
     cdn_hosts: Vec<String>,
-    config: DownloaderConfig,
+    config: Config,
 }
 
 impl CdnClient {
-    pub fn new(config: DownloaderConfig) -> Self {
+    pub fn new(config: Config) -> Self {
         Self {
             http_client: HttpClient::builder()
                 .timeout(config.timeout)
@@ -38,7 +38,7 @@ impl CdnClient {
         };
 
         let srv_resp = connection
-            .service_method_with_retry(srv_req, self.config.max_retries, self.config.retry_delay)
+            .service_method_with_retry(srv_req, self.config.retry_policy.max_retries, self.config.retry_policy.retry_delay)
             .await?;
 
         if srv_resp.servers.is_empty() {
@@ -119,7 +119,7 @@ impl CdnClient {
         }
 
         let mut retry_count = 0;
-        let max_attempts = std::cmp::max(self.config.max_retries, server_hosts.len() as u32);
+        let max_attempts = std::cmp::max(self.config.retry_policy.max_retries, server_hosts.len() as u32);
 
         loop {
             let server_host = &server_hosts[(retry_count as usize) % server_hosts.len()];
@@ -200,14 +200,14 @@ impl CdnClient {
             if retry_count < max_attempts {
                 retry_count += 1;
                 if should_sleep {
-                    let delay_ms = self.config.retry_delay.as_millis();
+                    let delay_ms = self.config.retry_policy.retry_delay.as_millis();
                     tracing::debug!(
                         "Waiting {}ms before retry {} for chunk {}",
                         delay_ms,
                         retry_count + 1,
                         chunk_id
                     );
-                    tokio::time::sleep(self.config.retry_delay).await;
+                    tokio::time::sleep(self.config.retry_policy.retry_delay).await;
                 }
             } else {
                 return Err(SteamVentError::Cdn(format!(

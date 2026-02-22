@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use crate::cdn::CdnClient;
@@ -13,6 +14,13 @@ use steam_vent_proto::steammessages_contentsystem_steamclient::CContentServerDir
 use steam_vent_proto::steammessages_publishedfile_steamclient::{
     CPublishedFile_GetDetails_Request, PublishedFileDetails,
 };
+
+pub trait ProgressCallback: Send + Sync {
+    fn on_download_progress(&self, bytes: u64);
+    fn on_decode_progress(&self, bytes: u64);
+    fn on_write_progress(&self, bytes: u64);
+    fn on_file_complete(&self, path: &Path, bytes: usize);
+}
 
 #[derive(Debug, Clone)]
 pub struct ChunkDownloadTask {
@@ -97,8 +105,8 @@ impl CdnDownloader {
             ..Default::default()
         };
 
-        let max_retries = self.steam_client.config().max_retries;
-        let retry_delay = self.steam_client.config().retry_delay;
+        let max_retries = self.steam_client.max_retries();
+        let retry_delay = self.steam_client.retry_delay();
 
         let details_resp = self
             .steam_client
@@ -290,5 +298,187 @@ impl CdnDownloader {
         }
 
         Ok(files)
+    }
+
+    pub async fn download_to_directory(
+        &mut self,
+        files: &[DownloadItem],
+        base_path: &Path,
+        progress: Arc<dyn ProgressCallback>,
+    ) -> Result<()> {
+        let mut tasks: Vec<ChunkDownloadTask> = Vec::new();
+        for (file_index, file) in files.iter().enumerate() {
+            let depot = Arc::clone(&file.manifest_info.depot);
+            for (chunk_index, chunk) in file.manifest_info.chunks.iter().enumerate() {
+                tasks.push(ChunkDownloadTask {
+                    chunk_id: hex::encode(&chunk.sha),
+                    depot: Arc::clone(&depot),
+                    file_index,
+                    chunk_index,
+                    compressed_size: chunk.compressed_size,
+                });
+            }
+        }
+
+        let parallel_download = self.steam_client.config().parallel_download;
+        let parallel_decode = self.steam_client.config().parallel_decode;
+
+        let download_sem = Arc::new(tokio::sync::Semaphore::new(parallel_download));
+        let decode_sem = Arc::new(tokio::sync::Semaphore::new(parallel_decode));
+
+        let (download_tx, download_rx) = tokio::sync::mpsc::channel::<Result<CompressedChunk>>(32);
+        let (decode_tx, mut decode_rx) = tokio::sync::mpsc::channel::<Result<DownloadedChunk>>(32);
+
+        let cdn_client = self.cdn_client.clone();
+
+        for task in tasks {
+            let download_sem = download_sem.clone();
+            let download_tx = download_tx.clone();
+            let cdn_client = cdn_client.clone();
+
+            tokio::spawn({
+                let progress = progress.clone();
+                async move {
+                    let _permit = download_sem.acquire().await.unwrap();
+                    let compressed_data = cdn_client
+                        .download_chunk(
+                            &task.depot.server_hosts,
+                            task.depot.depot_id,
+                            &task.chunk_id,
+                        )
+                        .await;
+
+                    match compressed_data {
+                        Ok(data) => {
+                            progress.on_download_progress(task.compressed_size as u64);
+                            let _ = download_tx.send(Ok(CompressedChunk {
+                                depot: task.depot,
+                                file_index: task.file_index,
+                                chunk_index: task.chunk_index,
+                                compressed_data: data,
+                            })).await;
+                        }
+                        Err(e) => {
+                            let _ = download_tx.send(Err(e)).await;
+                        }
+                    }
+                }
+            });
+        }
+
+        let download_rx = Arc::new(tokio::sync::Mutex::new(download_rx));
+        let decode_sem_clone = decode_sem.clone();
+        let decode_tx_clone = decode_tx.clone();
+
+        tokio::spawn({
+            let progress = progress.clone();
+            async move {
+                loop {
+                    let mut rx = download_rx.lock().await;
+                    match rx.recv().await {
+                        Some(Ok(compressed)) => {
+                            drop(rx);
+                            let _permit = decode_sem_clone.acquire().await.unwrap();
+                            let decode_tx = decode_tx_clone.clone();
+                            let progress = progress.clone();
+
+                            tokio::spawn(async move {
+                                let depot_key = compressed.depot.depot_key.as_deref();
+                                let decoded: Result<Vec<u8>> = CdnClient::decode_chunk(&compressed.compressed_data, depot_key);
+
+                                match decoded {
+                                    Ok(data) => {
+                                        let len = data.len() as u64;
+                                        progress.on_decode_progress(len);
+                                        progress.on_write_progress(len);
+                                        let _ = decode_tx.send(Ok(DownloadedChunk {
+                                            file_index: compressed.file_index,
+                                            chunk_index: compressed.chunk_index,
+                                            data,
+                                        })).await;
+                                    }
+                                    Err(e) => {
+                                        let _ = decode_tx.send(Err(e)).await;
+                                    }
+                                }
+                            });
+                        }
+                        Some(Err(e)) => {
+                            let _ = decode_tx.send(Err(e)).await;
+                        }
+                        None => break,
+                    }
+                }
+            }
+        });
+
+        drop(download_tx);
+
+        let chunk_buffers: Arc<tokio::sync::Mutex<HashMap<usize, Vec<(usize, Vec<u8>)>>>> =
+            Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+
+        while let Some(result) = decode_rx.recv().await {
+            match result {
+                Ok(chunk) => {
+                    let mut buffers = chunk_buffers.lock().await;
+                    buffers
+                        .entry(chunk.file_index)
+                        .or_insert_with(Vec::new)
+                        .push((chunk.chunk_index, chunk.data));
+
+                    let file = &files[chunk.file_index];
+                    let total_chunks = file.manifest_info.chunks.len();
+
+                    if let Some(chunks) = buffers.get(&chunk.file_index) {
+                        if chunks.len() == total_chunks {
+                            let file_path = base_path.join(&file.filename);
+                            let mut file_data: Vec<(usize, Vec<u8>)> = chunks.clone();
+                            file_data.sort_by_key(|(idx, _)| *idx);
+
+                            let mut full_data = Vec::new();
+                            for (_, data) in file_data {
+                                full_data.extend(data);
+                            }
+
+                            buffers.remove(&chunk.file_index);
+
+                            let output_path = file_path.clone();
+                            let full_data_len = full_data.len();
+                            progress.on_file_complete(&output_path, full_data_len);
+                            tokio::spawn(async move {
+                                let mut file_handle = tokio::fs::File::create(&output_path).await.unwrap();
+                                use tokio::io::AsyncWriteExt;
+                                file_handle.write_all(&full_data).await.unwrap();
+                            });
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Error: {}", e);
+                    return Err(e);
+                }
+            }
+        }
+
+        for (file_index, buffers) in chunk_buffers.lock().await.iter() {
+            if !buffers.is_empty() {
+                let file = &files[*file_index];
+                let file_path = base_path.join(&file.filename);
+                let mut file_data: Vec<(usize, Vec<u8>)> = buffers.clone();
+                file_data.sort_by_key(|(idx, _)| *idx);
+
+                let mut full_data = Vec::new();
+                for (_, data) in file_data {
+                    full_data.extend(data);
+                }
+
+                let mut file_handle = tokio::fs::File::create(&file_path).await?;
+                use tokio::io::AsyncWriteExt;
+                file_handle.write_all(&full_data).await?;
+                progress.on_file_complete(&file_path, full_data.len());
+            }
+        }
+
+        Ok(())
     }
 }

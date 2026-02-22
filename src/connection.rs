@@ -1,21 +1,22 @@
-use crate::config::DownloaderConfig;
+use crate::config::Config;
 use crate::error::{Result, SteamVentError};
+use std::time::Duration;
 
 use steam_vent::ServerList;
 use steam_vent::auth::{FileGuardDataStore, UserProvidedAuthConfirmationHandler};
 use steam_vent::connection::Connection;
 
 pub struct SteamClient {
-    config: DownloaderConfig,
+    config: Config,
 }
 
 pub struct SteamSession {
     pub connection: Connection,
-    config: DownloaderConfig,
+    config: crate::config::Config,
 }
 
 impl SteamClient {
-    pub fn new(config: DownloaderConfig) -> Self {
+    pub fn new(config: Config) -> Self {
         Self { config }
     }
 
@@ -60,8 +61,16 @@ impl SteamSession {
         &mut self.connection
     }
 
-    pub fn config(&self) -> &DownloaderConfig {
+    pub fn config(&self) -> &Config {
         &self.config
+    }
+
+    pub fn max_retries(&self) -> u32 {
+        self.config.retry_policy.max_retries
+    }
+
+    pub fn retry_delay(&self) -> Duration {
+        self.config.retry_policy.retry_delay
     }
 }
 
