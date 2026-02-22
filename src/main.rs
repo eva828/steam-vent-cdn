@@ -23,34 +23,38 @@ struct Args {
     item_id: u64,
 
     #[arg(short, long)]
-    app_id: Option<u32>,
+    app_id: u32,
 
-    #[arg(short, long, default_value = "./mods")]
+    #[arg(short, long, default_value = "./output")]
     output: PathBuf,
 
-    #[arg(short, long, default_value = ".tmod")]
-    filter: String,
+    #[arg(short, long)]
+    filter: Option<String>,
 
     #[arg(short, long)]
     username: Option<String>,
 
-    #[arg(short, long)]
+    #[arg(
+        short,
+        long,
+        help = "If a username is provided but the password is omitted, you will be prompted for it."
+    )]
     password: Option<String>,
 
     #[arg(short, long)]
     list: bool,
 
-    #[arg(short = 'c', long)]
-    concurrent_downloads: Option<usize>,
+    #[arg(short = 'c', long, default_value_t = 8)]
+    concurrent_downloads: usize,
 
     #[arg(short, long)]
     verbose: bool,
 }
 
 fn setup_tracing(verbose: bool) -> tracing_appender::non_blocking::WorkerGuard {
-    // Write logs to a file in the current directory
-    let file_appender = tracing_appender::rolling::never(".", "run.log");
-    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+    // Write logs to a file in the current directory, clearing previous contents
+    let log_file = std::fs::File::create("run.log").expect("Failed to create log file");
+    let (non_blocking, guard) = tracing_appender::non_blocking(log_file);
 
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         if verbose {
@@ -106,6 +110,10 @@ async fn main() -> Result<()> {
         (Some(username), Some(password)) => {
             crate::config::Credentials::UserPass { username, password }
         }
+        (Some(username), None) => {
+            let password = rpassword::prompt_password("Password: ").unwrap_or_default();
+            crate::config::Credentials::UserPass { username, password }
+        }
         _ => crate::config::Credentials::Anonymous,
     };
     let config = crate::config::DownloaderConfig::new(credentials)
@@ -122,7 +130,13 @@ async fn main() -> Result<()> {
 
     let items: Vec<DownloadItem> = files
         .into_iter()
-        .filter(|(filename, _)| filename.ends_with(".tmod"))
+        .filter(|(filename, _)| {
+            if let Some(f) = &args.filter {
+                filename.ends_with(f)
+            } else {
+                true
+            }
+        })
         .map(|(filename, manifest_info)| DownloadItem {
             item_id: args.item_id,
             filename,
@@ -133,13 +147,22 @@ async fn main() -> Result<()> {
     log::info!("Found {} files to download.", items.len());
 
     for item in items {
-        let stream = downloader.get_stream(&item).await?;
-        tokio::pin!(stream);
         let output_path = args.output.join(&item.filename);
 
         if let Some(parent) = output_path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
+
+        // Check if item is a directory (EDepotFileFlag::Directory = 64)
+        const FLAG_DIRECTORY: u32 = 0x40;
+        if (item.manifest_info.flags.unwrap_or(0) & FLAG_DIRECTORY) != 0 {
+            tokio::fs::create_dir_all(&output_path).await?;
+            log::info!("Created directory: {}", item.filename);
+            continue;
+        }
+
+        let stream = downloader.get_stream(&item).await?;
+        tokio::pin!(stream);
 
         let mut file = tokio::fs::File::create(&output_path).await?;
 

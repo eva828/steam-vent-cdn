@@ -1,11 +1,10 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::cdn::CdnClient;
 use crate::connection::{ConnectionExt, SteamSession};
 use crate::error::{Result, SteamVentError};
-use crate::manifest::ProtobufManifestParser;
 use futures::stream::{self, Stream, StreamExt};
-use hex;
 use steam_vent::ConnectionTrait;
 use steam_vent_proto::content_manifest::ContentManifestPayload;
 use steam_vent_proto::steammessages_clientserver_2::{
@@ -19,14 +18,19 @@ use steam_vent_proto::steammessages_publishedfile_steamclient::{
 pub struct CdnDownloader {
     steam_client: SteamSession,
     cdn_client: CdnClient,
-    manifest_parser: ProtobufManifestParser,
+}
+
+#[derive(Debug, Clone)]
+pub struct DepotContext {
+    pub server_hosts: Vec<String>,
+    pub depot_id: u32,
+    pub depot_key: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct DownloadManifest {
     pub manifest: ContentManifestPayload,
-    pub server_hosts: Vec<String>,
-    pub depot_id: u32,
+    pub depot: Arc<DepotContext>,
 }
 
 #[derive(Debug, Clone)]
@@ -36,9 +40,11 @@ pub struct ChunkInfo {
 
 #[derive(Debug, Clone)]
 pub struct FileManifestInfo {
-    pub server_hosts: Vec<String>,
-    pub depot_id: u32,
     pub chunks: Vec<ChunkInfo>,
+    pub flags: Option<u32>,
+    #[allow(dead_code)]
+    pub size: Option<u64>,
+    pub depot: Arc<DepotContext>,
 }
 
 #[derive(Debug, Clone)]
@@ -57,7 +63,6 @@ impl CdnDownloader {
         Self {
             steam_client,
             cdn_client: CdnClient::new(config),
-            manifest_parser: ProtobufManifestParser,
         }
     }
 
@@ -166,8 +171,9 @@ impl CdnDownloader {
             .download_manifest(&servers, depot_id, manifest_id, mrc)
             .await?;
 
-        let (mut manifest, metadata) = self.manifest_parser.parse(&manifest_bytes)?;
+        let (mut manifest, metadata) = crate::manifest::parse_manifest(&manifest_bytes)?;
 
+        let mut depot_key_opt = None;
         if let Some(ref m) = metadata {
             if m.filenames_encrypted.unwrap_or(false) {
                 log::info!("Manifest filenames are encrypted.");
@@ -178,16 +184,18 @@ impl CdnDownloader {
                     "Depot key received ({} bytes). Decrypting filenames...",
                     depot_key.len()
                 );
-                self.manifest_parser
-                    .decrypt_filenames(&mut manifest, &depot_key)?;
+                crate::manifest::decrypt_manifest_filenames(&mut manifest, &depot_key)?;
+                depot_key_opt = Some(depot_key);
             }
         }
 
-        Ok(DownloadManifest {
-            manifest,
+        let depot = Arc::new(DepotContext {
             server_hosts: servers,
             depot_id,
-        })
+            depot_key: depot_key_opt,
+        });
+
+        Ok(DownloadManifest { manifest, depot })
     }
 
     pub async fn fetch_manifest_info(
@@ -210,9 +218,10 @@ impl CdnDownloader {
             files.insert(
                 filename,
                 FileManifestInfo {
-                    server_hosts: manifest_data.server_hosts.clone(),
-                    depot_id: manifest_data.depot_id,
                     chunks,
+                    flags: mapping.flags,
+                    size: mapping.size,
+                    depot: Arc::clone(&manifest_data.depot),
                 },
             );
         }
@@ -224,20 +233,24 @@ impl CdnDownloader {
         &self,
         item: &DownloadItem,
     ) -> Result<impl Stream<Item = Result<Vec<u8>>> + '_> {
-        let server_hosts = item.manifest_info.server_hosts.clone();
-        let depot_id = item.manifest_info.depot_id;
+        let depot = Arc::clone(&item.manifest_info.depot);
         let chunks: Vec<ChunkInfo> = item.manifest_info.chunks.clone();
 
         let concurrent_downloads = self.steam_client.config().concurrent_downloads;
 
         Ok(stream::iter(chunks)
             .map(move |chunk| {
-                let servers = server_hosts.clone();
+                let depot = Arc::clone(&depot);
                 let cdn_client = self.cdn_client.clone();
                 async move {
                     let chunk_id = hex::encode(chunk.sha);
                     cdn_client
-                        .download_chunk(&servers, depot_id, &chunk_id)
+                        .download_chunk(
+                            &depot.server_hosts,
+                            depot.depot_id,
+                            &chunk_id,
+                            depot.depot_key.as_deref(),
+                        )
                         .await
                 }
             })

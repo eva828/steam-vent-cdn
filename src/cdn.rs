@@ -1,4 +1,3 @@
-use crate::archive::ZipArchiveExtractor;
 use crate::config::DownloaderConfig;
 use crate::connection::ConnectionExt;
 use crate::error::{Result, SteamVentError};
@@ -99,6 +98,7 @@ impl CdnClient {
         server_hosts: &[String],
         depot_id: u32,
         chunk_id: &str,
+        depot_key: Option<&[u8]>,
     ) -> Result<Vec<u8>> {
         if server_hosts.is_empty() {
             return Err(SteamVentError::Cdn("No CDN servers available".to_string()));
@@ -119,10 +119,12 @@ impl CdnClient {
             match self.http_client.get(&chunk_url).send().await {
                 Ok(resp) if resp.status().is_success() => {
                     let data = resp.bytes().await?;
-                    if let Ok(extractor) = ZipArchiveExtractor::new(&data) {
-                        return extractor.extract();
-                    } else {
-                        return Ok(data.to_vec());
+                    match crate::archive::SteamChunk::new(&data).decode(depot_key) {
+                        Ok(decoded) => return Ok(decoded),
+                        Err(e) => {
+                            log::warn!("Chunk decoding failed for {}: {}", chunk_id, e);
+                            return Ok(data.to_vec());
+                        }
                     }
                 }
                 Ok(resp) => {

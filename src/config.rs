@@ -43,17 +43,13 @@ impl DownloaderConfig {
         }
     }
 
-    pub fn with_app_id(mut self, app_id: Option<u32>) -> Self {
-        if let Some(id) = app_id {
-            self.app_id = id;
-        }
+    pub fn with_app_id(mut self, app_id: u32) -> Self {
+        self.app_id = app_id;
         self
     }
 
-    pub fn with_concurrent_downloads(mut self, concurrent_downloads: Option<usize>) -> Self {
-        if let Some(c) = concurrent_downloads {
-            self.concurrent_downloads = c;
-        }
+    pub fn with_concurrent_downloads(mut self, concurrent_downloads: usize) -> Self {
+        self.concurrent_downloads = concurrent_downloads;
         self
     }
 }

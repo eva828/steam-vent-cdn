@@ -38,3 +38,6 @@ cbc = "0.1.2"
 steam-vent = { git = "https://codeberg.org/eva828/steam-vent.git", branch = "main" }
 steam-vent-proto = "0.5.2"
 tracing-appender = "0.2.4"
+rpassword = "7.4.0"
+block-modes = "0.9.1"
+zstd = "0.13.3"
