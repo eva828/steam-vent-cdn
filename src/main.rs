@@ -20,16 +20,21 @@ use tracing_subscriber::util::SubscriberInitExt;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[arg(short, long)]
-    item_id: u64,
-
-    #[arg(short, long)]
+    #[arg(help = "The ID of the app that the workshop item belongs to")]
     app_id: u32,
 
-    #[arg(short, long, default_value = "./output")]
+    #[arg(help = "The ID of the workshop item to download")]
+    item_id: u64,
+
+    #[arg(
+        short,
+        long,
+        default_value = "./output",
+        help = "The directory where the downloaded files will be saved"
+    )]
     output: PathBuf,
 
-    #[arg(short, long)]
+    #[arg(short, long, help = "Steam username for authentication")]
     username: Option<String>,
 
     #[arg(
@@ -39,13 +44,22 @@ struct Args {
     )]
     password: Option<String>,
 
-    #[arg(short, long)]
+    #[arg(
+        short,
+        long,
+        help = "Only list the files in the workshop item without downloading"
+    )]
     list: bool,
 
-    #[arg(short = 'c', long, default_value_t = 8)]
+    #[arg(
+        short = 'c',
+        long,
+        default_value_t = 8,
+        help = "The number of concurrent downloads"
+    )]
     concurrent_downloads: usize,
 
-    #[arg(short, long)]
+    #[arg(short, long, help = "Enable verbose output")]
     verbose: bool,
 }
 
