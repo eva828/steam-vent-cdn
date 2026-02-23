@@ -527,10 +527,13 @@ impl CdnDownloader {
                         let full_data_len = full_data.len();
                         progress.on_file_complete(&output_path, full_data_len);
                         tokio::spawn(async move {
-                            let mut file_handle =
-                                tokio::fs::File::create(&output_path).await.unwrap();
-                            use tokio::io::AsyncWriteExt;
-                            file_handle.write_all(&full_data).await.unwrap();
+                            if let Err(e) = tokio::fs::write(&output_path, &full_data).await {
+                                tracing::error!(
+                                    "Failed to write file {}: {}",
+                                    output_path.display(),
+                                    e
+                                );
+                            }
                         });
                     }
                 }
