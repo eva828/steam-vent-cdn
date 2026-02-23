@@ -173,7 +173,6 @@ pub async fn run_download_pipeline(
     let items: Vec<DownloadItem> = file_map
         .into_iter()
         .map(|(filename, manifest_info)| DownloadItem {
-            item_id: args.item_id,
             filename,
             manifest_info,
         })

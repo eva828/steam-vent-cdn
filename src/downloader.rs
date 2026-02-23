@@ -108,19 +108,6 @@ impl DownloadManifest {
 
         Ok(files)
     }
-
-    #[allow(dead_code)]
-    pub(crate) fn to_download_items(&self, item_id: u64) -> Result<Vec<DownloadItem>> {
-        let file_map = self.to_file_map()?;
-        Ok(file_map
-            .into_iter()
-            .map(|(filename, manifest_info)| DownloadItem {
-                item_id,
-                filename,
-                manifest_info,
-            })
-            .collect())
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -134,17 +121,12 @@ pub struct ChunkInfo {
 pub struct FileManifestInfo {
     pub chunks: Vec<ChunkInfo>,
     pub flags: Option<u32>,
-    #[allow(dead_code)]
     pub size: Option<u64>,
     pub depot: Arc<DepotContext>,
 }
 
 #[derive(Debug, Clone)]
 pub struct DownloadItem {
-    // Currently unused during download/extraction, but kept as it conceptually
-    // identifies the workshop item this file belongs to. Useful for future extensions.
-    #[allow(dead_code)]
-    pub item_id: u64,
     pub filename: String,
     pub manifest_info: FileManifestInfo,
 }
