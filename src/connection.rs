@@ -106,7 +106,7 @@ pub(crate) trait ConnectionExt: steam_vent::ConnectionTrait + Sync {
                         tokio::time::sleep(retry_delay).await;
                         retry_count += 1;
                     }
-                    _ => return Err(SteamVentError::Connection(SteamConnectionError::ApiCallFailed(e))),
+                    _ => return Err(SteamVentError::Connection(SteamConnectionError::from(e))),
                 }
             }
         }

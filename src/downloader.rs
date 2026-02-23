@@ -200,7 +200,7 @@ impl CdnDownloader {
             .connection_mut()
             .service_method(history_req)
             .await
-            .map_err(SteamConnectionError::ApiCallFailed)
+            .map_err(|e| SteamConnectionError::ApiCallFailed(Box::new(e)))
             .map_err(SteamVentError::Connection)?;
 
         let versions: Vec<VersionInfo> = history_resp
@@ -247,7 +247,7 @@ impl CdnDownloader {
             .connection_mut()
             .service_method(code_req)
             .await
-            .map_err(SteamConnectionError::ApiCallFailed)
+            .map_err(|e| SteamConnectionError::ApiCallFailed(Box::new(e)))
             .map_err(SteamVentError::Connection)?;
         code_resp
             .manifest_request_code
@@ -266,7 +266,7 @@ impl CdnDownloader {
             .connection_mut()
             .job(key_req)
             .await
-            .map_err(SteamConnectionError::ApiCallFailed)
+            .map_err(|e| SteamConnectionError::ApiCallFailed(Box::new(e)))
             .map_err(SteamVentError::Connection)?;
         if key_resp.eresult() != 1 {
             return Err(SteamVentError::CdnConnection(CdnConnectionError::DepotKeyFailed(key_resp.eresult())));

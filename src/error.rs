@@ -12,12 +12,12 @@ pub enum SteamConnectionError {
     LoginFailed(String),
 
     #[error("Steam API call failed")]
-    ApiCallFailed(#[source] steam_vent::NetworkError),
+    ApiCallFailed(#[source] Box<steam_vent::NetworkError>),
 }
 
 impl From<steam_vent::NetworkError> for SteamConnectionError {
     fn from(err: steam_vent::NetworkError) -> Self {
-        Self::ApiCallFailed(err)
+        Self::ApiCallFailed(Box::new(err))
     }
 }
 
