@@ -23,7 +23,7 @@ impl SteamClient {
     pub async fn connect(self) -> Result<SteamSession> {
         let server_list = ServerList::discover()
             .await
-            .map_err(|e| SteamVentError::Connection(SteamConnectionError::ServerDiscovery(e.to_string())))?;
+            .map_err(SteamConnectionError::ServerDiscovery)?;
 
         let mut connection = match &self.config.credentials {
             crate::config::Credentials::Anonymous => {
@@ -106,7 +106,7 @@ pub(crate) trait ConnectionExt: steam_vent::ConnectionTrait + Sync {
                         tokio::time::sleep(retry_delay).await;
                         retry_count += 1;
                     }
-                    _ => return Err(SteamVentError::Connection(SteamConnectionError::from(e))),
+                    _ => return Err(SteamVentError::Connection(e.into())),
                 }
             }
         }

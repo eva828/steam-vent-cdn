@@ -1,6 +1,6 @@
 use crate::error::{CompressionError, EncryptionError, Result, SteamVentError};
-use aes::Aes256;
 use aes::cipher::{BlockDecrypt, KeyInit};
+use aes::Aes256;
 use cbc::cipher::{BlockDecryptMut, KeyIvInit};
 use std::io::{Cursor, Read};
 
@@ -24,13 +24,9 @@ impl<'a> ZipArchiveExtractor<'a> {
 
 impl<'a> ArchiveExtractor for ZipArchiveExtractor<'a> {
     fn extract(&self) -> Result<Vec<u8>> {
-        let mut zip = zip::ZipArchive::new(Cursor::new(self.data))
-            .map_err(CompressionError::Zip)
-            .map_err(SteamVentError::Compression)?;
-        let mut file = zip
-            .by_index(0)
-            .map_err(CompressionError::Zip)
-            .map_err(SteamVentError::Compression)?;
+        let mut zip =
+            zip::ZipArchive::new(Cursor::new(self.data)).map_err(CompressionError::Zip)?;
+        let mut file = zip.by_index(0).map_err(CompressionError::Zip)?;
         let mut buffer = Vec::new();
         file.read_to_end(&mut buffer).map_err(SteamVentError::Io)?;
         tracing::debug!(
@@ -64,12 +60,9 @@ impl<'a> ArchiveExtractor for ZstdArchiveExtractor<'a> {
         let zstd_payload = &self.data[8..];
         let mut decompressed = Vec::new();
         let mut decoder = zstd::stream::Decoder::new(Cursor::new(zstd_payload))
-            .map_err(CompressionError::Zstd)
-            .map_err(SteamVentError::Compression)?
+            .map_err(CompressionError::Zstd)?
             .single_frame();
-        std::io::copy(&mut decoder, &mut decompressed)
-            .map_err(CompressionError::Zstd)
-            .map_err(SteamVentError::Compression)?;
+        std::io::copy(&mut decoder, &mut decompressed)?;
         tracing::debug!(
             "Zstd extracted successfully: {} bytes input -> {} bytes output",
             self.data.len(),
@@ -201,9 +194,7 @@ impl<'a> ArchiveExtractor for LzmaArchiveExtractor<'a> {
         let input_size = self.data.len() - self.offset;
         let mut reader = Cursor::new(&self.data[self.offset..]);
         let mut decompressed = Vec::new();
-        lzma_rs::lzma_decompress(&mut reader, &mut decompressed)
-            .map_err(CompressionError::Lzma)
-            .map_err(SteamVentError::Compression)?;
+        lzma_rs::lzma_decompress(&mut reader, &mut decompressed).map_err(CompressionError::Lzma)?;
         tracing::debug!(
             "LZMA extracted successfully: {} bytes input -> {} bytes output",
             input_size,

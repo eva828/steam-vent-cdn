@@ -3,7 +3,7 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum SteamConnectionError {
     #[error("Steam server discovery failed: {0}")]
-    ServerDiscovery(String),
+    ServerDiscovery(#[from] steam_vent::ServerDiscoveryError),
 
     #[error("Steam session initialization failed: {0}")]
     SessionInit(String),
@@ -45,13 +45,13 @@ pub enum CdnConnectionError {
 #[derive(Error, Debug)]
 pub enum CompressionError {
     #[error("Zstd decompression failed")]
-    Zstd(#[source] std::io::Error),
+    Zstd(#[from] std::io::Error),
 
     #[error("LZMA/VZa decompression failed")]
-    Lzma(#[source] lzma_rs::error::Error),
+    Lzma(#[from] lzma_rs::error::Error),
 
     #[error("ZIP extraction failed")]
-    Zip(#[source] zip::result::ZipError),
+    Zip(#[from] zip::result::ZipError),
 
     #[error("Invalid compression data: {0}")]
     InvalidData(String),
@@ -84,22 +84,22 @@ pub enum ManifestError {
 #[derive(Error, Debug)]
 pub enum SteamVentError {
     #[error("Steam connection error")]
-    Connection(#[source] SteamConnectionError),
+    Connection(#[from] SteamConnectionError),
 
     #[error("CDN connection error")]
-    CdnConnection(#[source] CdnConnectionError),
+    CdnConnection(#[from] CdnConnectionError),
 
     #[error("Compression error")]
-    Compression(#[source] CompressionError),
+    Compression(#[from] CompressionError),
 
     #[error("Encryption error")]
-    Encryption(#[source] EncryptionError),
+    Encryption(#[from] EncryptionError),
 
     #[error("Network error")]
     Network(#[from] reqwest::Error),
 
     #[error("Manifest error")]
-    Manifest(#[source] ManifestError),
+    Manifest(#[from] ManifestError),
 
     #[error("Invalid data: {0}")]
     InvalidData(String),
