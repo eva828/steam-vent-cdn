@@ -127,12 +127,21 @@ impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
         let uncompressed_size =
             u32::from_le_bytes(uncompressed_size_bytes.try_into().unwrap_or([0; 4])) as usize;
 
-        // If size is zero or unreasonably large, return error
-        if uncompressed_size == 0 || uncompressed_size > 100_000_000 {
+        const MAX_VZA_SIZE: usize = 1_000_000_000;
+
+        if uncompressed_size == 0 {
+            return Err(SteamVentError::Compression(CompressionError::InvalidData(
+                "VZa uncompressed size is zero".to_string(),
+            )));
+        }
+
+        if uncompressed_size > MAX_VZA_SIZE {
             return Err(SteamVentError::Compression(CompressionError::InvalidData(
                 format!(
-                    "Suspicious uncompressed size {} (max 100MB)",
-                    uncompressed_size
+                    "VZa uncompressed size {} exceeds maximum allowed size of {} bytes ({} MiB)",
+                    uncompressed_size,
+                    MAX_VZA_SIZE,
+                    MAX_VZA_SIZE / 1024 / 1024
                 ),
             )));
         }
