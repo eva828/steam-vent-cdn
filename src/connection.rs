@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::error::{Result, SteamVentError};
+use crate::error::{Result, SteamConnectionError, SteamVentError};
 use std::time::Duration;
 
 use steam_vent::ServerList;
@@ -23,14 +23,14 @@ impl SteamClient {
     pub async fn connect(self) -> Result<SteamSession> {
         let server_list = ServerList::discover()
             .await
-            .map_err(|e| SteamVentError::Connection(e.to_string()))?;
+            .map_err(|e| SteamVentError::Connection(SteamConnectionError::ServerDiscovery(e.to_string())))?;
 
         let mut connection = match &self.config.credentials {
             crate::config::Credentials::Anonymous => {
                 tracing::info!("Connecting anonymously to Steam");
                 Connection::anonymous(&server_list)
                     .await
-                    .map_err(|e| SteamVentError::Connection(e.to_string()))?
+                    .map_err(|e| SteamVentError::Connection(SteamConnectionError::SessionInit(e.to_string())))?
             }
             crate::config::Credentials::UserPass { username, password } => {
                 tracing::info!("Logging in as {}", username);
@@ -42,7 +42,7 @@ impl SteamClient {
 
                 Connection::login(&server_list, username, password, guard_store, auth_handler)
                     .await
-                    .map_err(|e| SteamVentError::Connection(e.to_string()))?
+                    .map_err(|e| SteamVentError::Connection(SteamConnectionError::LoginFailed(e.to_string())))?
             }
         };
 
@@ -106,7 +106,7 @@ pub(crate) trait ConnectionExt: steam_vent::ConnectionTrait + Sync {
                         tokio::time::sleep(retry_delay).await;
                         retry_count += 1;
                     }
-                    _ => return Err(SteamVentError::Connection(e.to_string())),
+                    _ => return Err(SteamVentError::Connection(SteamConnectionError::ApiCallFailed(e))),
                 }
             }
         }

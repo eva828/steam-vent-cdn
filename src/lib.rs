@@ -13,5 +13,5 @@ pub use downloader::{
     ChunkDownloadTask, CompressedChunk, DownloadedChunk,
     DepotContext, FileManifestInfo, ChunkInfo, VersionInfo,
 };
-pub use error::{Result, SteamVentError};
+pub use error::{Result, SteamVentError, ManifestError};
 pub use archive::SteamChunk;

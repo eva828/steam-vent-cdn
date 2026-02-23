@@ -1,8 +1,8 @@
 use crate::archive::ArchiveExtractor;
-use crate::error::{Result, SteamVentError};
-use aes::cipher::{block_padding::Pkcs7, BlockDecrypt, BlockDecryptMut, KeyInit, KeyIvInit};
+use crate::error::{EncryptionError, ManifestError, Result, SteamVentError};
 use aes::Aes256;
-use base64::{engine::general_purpose, Engine as _};
+use aes::cipher::{BlockDecrypt, BlockDecryptMut, KeyInit, KeyIvInit, block_padding::Pkcs7};
+use base64::{Engine as _, engine::general_purpose};
 use cbc::Decryptor;
 use steam_vent_proto::content_manifest::{ContentManifestMetadata, ContentManifestPayload};
 use steam_vent_proto::protobuf::Message;
@@ -19,9 +19,9 @@ fn decrypt_string(
     cipher_ecb: &Aes256,
 ) -> Result<String> {
     if enc_val.is_empty() {
-        return Err(SteamVentError::Decryption(
+        return Err(SteamVentError::Encryption(EncryptionError::Decrypt(
             "Empty encrypted value".to_string(),
-        ));
+        )));
     }
     let enc_val_clean = enc_val.replace(['\n', '\r', ' '], "");
     let decoded_res = general_purpose::STANDARD
@@ -29,14 +29,19 @@ fn decrypt_string(
         .or_else(|_| general_purpose::URL_SAFE.decode(&enc_val_clean));
 
     let encrypted_bytes = decoded_res.map_err(|e| {
-        SteamVentError::Decryption(format!("Failed to decode Base64 for {}: {}", enc_val, e))
+        SteamVentError::Encryption(EncryptionError::Decrypt(format!(
+            "Base64 decode failed for {}: {}",
+            enc_val, e
+        )))
     })?;
 
     if encrypted_bytes.len() < 16 {
-        return Err(SteamVentError::Decryption(format!(
-            "Encrypted value too short for {}: {} bytes",
-            enc_val,
-            encrypted_bytes.len()
+        return Err(SteamVentError::Encryption(EncryptionError::Decrypt(
+            format!(
+                "Encrypted value too short for {}: {} bytes",
+                enc_val,
+                encrypted_bytes.len()
+            ),
         )));
     }
 
@@ -48,9 +53,8 @@ fn decrypt_string(
 
     let encrypted_data = &encrypted_bytes[16..];
     if encrypted_data.is_empty() {
-        return Err(SteamVentError::Decryption(format!(
-            "Encrypted data empty for {}",
-            enc_val
+        return Err(SteamVentError::Encryption(EncryptionError::Decrypt(
+            format!("Encrypted data empty for {}", enc_val),
         )));
     }
 
@@ -59,7 +63,10 @@ fn decrypt_string(
     let plaintext = decryptor
         .decrypt_padded_mut::<Pkcs7>(&mut buf)
         .map_err(|e| {
-            SteamVentError::Decryption(format!("Decryption failed for {}: {}", enc_val, e))
+            SteamVentError::Encryption(EncryptionError::Decrypt(format!(
+                "CBC decrypt failed for {}: {}",
+                enc_val, e
+            )))
         })?;
 
     let clean_bytes = match plaintext.iter().position(|&b| b == 0) {
@@ -103,11 +110,11 @@ pub(crate) fn parse_manifest(
                 length,
                 payload_bytes.len() - cursor - 8
             );
-            return Err(SteamVentError::Manifest(format!(
+            return Err(SteamVentError::Manifest(ManifestError::Custom(format!(
                 "Segment length {} exceeds remaining data {}",
                 length,
                 payload_bytes.len() - cursor - 8
-            )));
+            ))));
         }
 
         let segment_data = &payload_bytes[cursor + 8..cursor + 8 + length];
@@ -117,9 +124,8 @@ pub(crate) fn parse_manifest(
             final_payload.extend_from_slice(segment_data);
         } else if magic == MAGIC_METADATA_1 || magic == MAGIC_METADATA_2 {
             tracing::debug!("Decoding Metadata segment");
-            let m = ContentManifestMetadata::parse_from_bytes(segment_data).map_err(|e| {
-                SteamVentError::Manifest(format!("Failed to decode Metadata segment: {}", e))
-            })?;
+            let m = ContentManifestMetadata::parse_from_bytes(segment_data)
+                .map_err(|e| SteamVentError::Manifest(ManifestError::Decode(e.to_string())))?;
             tracing::debug!(
                 "Metadata: Names encrypted: {:?}, Depot ID: {:?}",
                 m.filenames_encrypted,
@@ -130,10 +136,10 @@ pub(crate) fn parse_manifest(
             tracing::debug!("Found Signature segment (skipping)");
         } else {
             tracing::error!("Unknown segment magic: 0x{:08X}", magic);
-            return Err(SteamVentError::Manifest(format!(
+            return Err(SteamVentError::Manifest(ManifestError::Custom(format!(
                 "Unknown segment magic: 0x{:08X}",
                 magic
-            )));
+            ))));
         }
 
         cursor += 8 + length;
@@ -141,13 +147,13 @@ pub(crate) fn parse_manifest(
 
     if final_payload.is_empty() {
         tracing::error!("No Payload segment found, manifest is invalid");
-        return Err(SteamVentError::Manifest(
+        return Err(SteamVentError::Manifest(ManifestError::Custom(
             "No Payload segment found in manifest".to_string(),
-        ));
+        )));
     }
 
     let manifest = ContentManifestPayload::parse_from_bytes(&final_payload)
-        .map_err(|e| SteamVentError::Manifest(e.to_string()))?;
+        .map_err(|e| SteamVentError::Manifest(ManifestError::Decode(e.to_string())))?;
 
     Ok((manifest, metadata))
 }
@@ -157,9 +163,8 @@ pub(crate) fn decrypt_manifest_filenames(
     depot_key: &[u8],
 ) -> Result<()> {
     if depot_key.len() != 32 {
-        return Err(SteamVentError::Decryption(format!(
-            "Invalid depot key length: {}",
-            depot_key.len()
+        return Err(SteamVentError::Encryption(EncryptionError::Decrypt(
+            format!("Invalid depot key length: {}", depot_key.len()),
         )));
     }
 

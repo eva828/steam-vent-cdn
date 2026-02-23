@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::connection::ConnectionExt;
-use crate::error::{Result, SteamVentError};
+use crate::error::{CdnConnectionError, Result, SteamVentError};
 use reqwest::Client as HttpClient;
 use steam_vent_proto::steammessages_contentsystem_steamclient::CContentServerDirectory_GetServersForSteamPipe_Request;
 
@@ -42,7 +42,7 @@ impl CdnClient {
             .await?;
 
         if srv_resp.servers.is_empty() {
-            return Err(SteamVentError::Cdn("No CDN servers available".to_string()));
+            return Err(SteamVentError::CdnConnection(CdnConnectionError::NoServers));
         }
 
         self.cdn_hosts = srv_resp
@@ -79,7 +79,7 @@ impl CdnClient {
                     let headers = resp.headers().clone();
                     let body_bytes = resp.bytes().await.unwrap_or_default();
                     let body_preview = String::from_utf8_lossy(&body_bytes[..body_bytes.len().min(256)]);
-                    return Err(SteamVentError::Cdn(format!(
+                    tracing::warn!(
                         "HTTP {} - Headers: {:?} - Body: {}",
                         status,
                         headers
@@ -87,7 +87,8 @@ impl CdnClient {
                             .filter_map(|(k, v)| v.to_str().ok().map(|v| (k.map(|k| k.as_str().to_string()).unwrap_or_default(), v.to_string())))
                             .collect::<Vec<_>>(),
                         body_preview
-                    )));
+                    );
+                    return Err(SteamVentError::CdnConnection(CdnConnectionError::HttpError { status }));
                 }
                 resp.bytes().await.map_err(SteamVentError::from)
             }
@@ -103,9 +104,7 @@ impl CdnClient {
                 }
             }
         }
-        Err(SteamVentError::Cdn(
-            "Failed to download manifest from all available CDN servers".to_string(),
-        ))
+        Err(SteamVentError::CdnConnection(CdnConnectionError::AllServersFailed))
     }
 
     pub async fn download_chunk(
@@ -115,7 +114,7 @@ impl CdnClient {
         chunk_id: &str,
     ) -> Result<Vec<u8>> {
         if server_hosts.is_empty() {
-            return Err(SteamVentError::Cdn("No CDN servers available".to_string()));
+            return Err(SteamVentError::CdnConnection(CdnConnectionError::NoServers));
         }
 
         let mut retry_count = 0;
@@ -210,10 +209,7 @@ impl CdnClient {
                     tokio::time::sleep(self.config.retry_policy.retry_delay).await;
                 }
             } else {
-                return Err(SteamVentError::Cdn(format!(
-                    "Failed to download chunk {} after {} attempts (tried {} servers)",
-                    chunk_id, max_attempts, server_hosts.len()
-                )));
+                return Err(SteamVentError::CdnConnection(CdnConnectionError::AllServersFailed));
             }
         }
     }

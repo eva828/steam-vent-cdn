@@ -6,7 +6,7 @@ pub use args::Args;
 use indicatif::MultiProgress;
 use progress::ProgressManager;
 use std::sync::Arc;
-use steam_vent_cdn::{CdnDownloader, Config, Credentials, DownloadItem, RetryPolicy, Result};
+use steam_vent_cdn::{CdnDownloader, Config, Credentials, DownloadItem, ManifestError, RetryPolicy, Result, SteamVentError};
 use tracing_subscriber::Layer;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -14,7 +14,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 pub fn setup_tracing(
     verbose: bool,
     output_dir: &std::path::Path,
-) -> std::result::Result<MultiProgress, Box<dyn std::error::Error>> {
+) -> Result<MultiProgress> {
     std::fs::create_dir_all(output_dir)?;
     let log_path = output_dir.join("steam-vent-cdn.log");
     let log_file = std::fs::File::create(&log_path)?;
@@ -71,14 +71,15 @@ pub fn setup_tracing(
     Ok(multi)
 }
 
-pub fn resolve_credentials(username: Option<String>, password: Option<String>) -> Credentials {
+pub fn resolve_credentials(username: Option<String>, password: Option<String>) -> Result<Credentials> {
     match (username, password) {
-        (Some(username), Some(password)) => Credentials::UserPass { username, password },
+        (Some(username), Some(password)) => Ok(Credentials::UserPass { username, password }),
         (Some(username), None) => {
-            let password = rpassword::prompt_password("Password: ").unwrap_or_default();
-            Credentials::UserPass { username, password }
+            let password = rpassword::prompt_password("Password: ")
+                .map_err(|e| SteamVentError::Manifest(ManifestError::Custom(format!("Password input failed: {}", e))))?;
+            Ok(Credentials::UserPass { username, password })
         }
-        _ => Credentials::Anonymous,
+        _ => Ok(Credentials::Anonymous),
     }
 }
 

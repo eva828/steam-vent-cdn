@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::cdn::CdnClient;
 use crate::connection::{ConnectionExt, SteamSession};
-use crate::error::{Result, SteamVentError};
+use crate::error::{CdnConnectionError, Result, SteamConnectionError, SteamVentError};
 use steam_vent::ConnectionTrait;
 use steam_vent_proto::content_manifest::ContentManifestPayload;
 use steam_vent_proto::steammessages_clientserver_2::{
@@ -200,7 +200,8 @@ impl CdnDownloader {
             .connection_mut()
             .service_method(history_req)
             .await
-            .map_err(|e| SteamVentError::Connection(e.to_string()))?;
+            .map_err(SteamConnectionError::ApiCallFailed)
+            .map_err(SteamVentError::Connection)?;
 
         let versions: Vec<VersionInfo> = history_resp
             .changes
@@ -246,10 +247,11 @@ impl CdnDownloader {
             .connection_mut()
             .service_method(code_req)
             .await
-            .map_err(|e| SteamVentError::Connection(e.to_string()))?;
+            .map_err(SteamConnectionError::ApiCallFailed)
+            .map_err(SteamVentError::Connection)?;
         code_resp
             .manifest_request_code
-            .ok_or_else(|| SteamVentError::Cdn("Failed to get manifest request code".to_string()))
+            .ok_or_else(|| SteamVentError::CdnConnection(CdnConnectionError::ManifestRequestCodeFailed))
     }
 
     pub(crate) async fn fetch_depot_key(&mut self, app_id: u32, depot_id: u32) -> Result<Vec<u8>> {
@@ -264,12 +266,10 @@ impl CdnDownloader {
             .connection_mut()
             .job(key_req)
             .await
-            .map_err(|e| SteamVentError::Connection(e.to_string()))?;
+            .map_err(SteamConnectionError::ApiCallFailed)
+            .map_err(SteamVentError::Connection)?;
         if key_resp.eresult() != 1 {
-            return Err(SteamVentError::Cdn(format!(
-                "Failed to get depot decryption key: EResult {}",
-                key_resp.eresult()
-            )));
+            return Err(SteamVentError::CdnConnection(CdnConnectionError::DepotKeyFailed(key_resp.eresult())));
         }
         Ok(key_resp.depot_encryption_key().to_vec())
     }
@@ -284,7 +284,7 @@ impl CdnDownloader {
             .await?;
         let servers = self.cdn_client.cdn_hosts().to_vec();
         if servers.is_empty() {
-            return Err(SteamVentError::Cdn("CDN hosts not resolved".to_string()));
+            return Err(SteamVentError::CdnConnection(CdnConnectionError::HostResolutionFailed));
         }
 
         let depot_id = app_id;
@@ -330,10 +330,7 @@ impl CdnDownloader {
             Err(e) => {
                 if need_key_for_filenames {
                     tracing::error!("Failed to fetch depot key for filename decryption: {}", e);
-                    return Err(SteamVentError::Cdn(format!(
-                        "Failed to fetch depot key: {}",
-                        e
-                    )));
+                    return Err(e);
                 } else {
                     tracing::debug!("No depot key fetched (not needed).");
                 }

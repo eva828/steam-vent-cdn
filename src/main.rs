@@ -2,16 +2,16 @@ mod cli;
 
 use clap::Parser;
 use cli::Args;
-use steam_vent_cdn::{SteamClient, CdnDownloader};
+use steam_vent_cdn::{SteamClient, CdnDownloader, Result};
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<()> {
     let args = Args::parse();
     let multi = cli::setup_tracing(args.verbose, &args.output)?;
 
     tracing::debug!("Item ID: {}", args.item_id);
 
-    let credentials = cli::resolve_credentials(args.username.clone(), args.password.clone());
+    let credentials = cli::resolve_credentials(args.username.clone(), args.password.clone())?;
     let config = cli::create_config(credentials, args.app_id, args.parallel_download, args.parallel_decode);
 
     let steam_client = SteamClient::new(config);
