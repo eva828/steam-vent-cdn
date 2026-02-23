@@ -100,6 +100,8 @@ impl ProgressManager {
     }
 
     pub fn finish(&self) {
+        let elapsed = self.start_time.elapsed();
+        tracing::info!("Total time: {:.2}s", elapsed.as_secs_f64());
         self.pb_download.finish_with_message("Download complete");
         self.pb_decode.finish_with_message("Decode complete");
         self.pb_write.finish_with_message("Write complete");
