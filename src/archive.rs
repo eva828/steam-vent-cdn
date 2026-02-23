@@ -1,6 +1,6 @@
 use crate::error::{CompressionError, EncryptionError, Result, SteamVentError};
-use aes::cipher::{BlockDecrypt, KeyInit};
 use aes::Aes256;
+use aes::cipher::{BlockDecrypt, KeyInit};
 use cbc::cipher::{BlockDecryptMut, KeyIvInit};
 use std::io::{Cursor, Read};
 

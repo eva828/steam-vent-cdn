@@ -6,12 +6,11 @@ mod downloader;
 mod error;
 mod manifest;
 
+pub use archive::SteamChunk;
 pub use config::{Config, ConfigBuilder, Credentials, RetryPolicy};
 pub use connection::{SteamClient, SteamSession};
 pub use downloader::{
-    CdnDownloader, DownloadItem, ProgressCallback,
-    ChunkDownloadTask, CompressedChunk, DownloadedChunk,
-    DepotContext, FileManifestInfo, ChunkInfo, VersionInfo,
+    CdnDownloader, ChunkDownloadTask, ChunkInfo, CompressedChunk, DepotContext, DownloadItem,
+    DownloadedChunk, FileManifestInfo, ProgressCallback, VersionInfo,
 };
-pub use error::{Result, SteamVentError, ManifestError};
-pub use archive::SteamChunk;
+pub use error::{ManifestError, Result, SteamVentError};

@@ -12,7 +12,8 @@ use steam_vent_proto::steammessages_clientserver_2::{
 };
 use steam_vent_proto::steammessages_contentsystem_steamclient::CContentServerDirectory_GetManifestRequestCode_Request;
 use steam_vent_proto::steammessages_publishedfile_steamclient::{
-    CPublishedFile_GetChangeHistory_Request, CPublishedFile_GetDetails_Request, PublishedFileDetails,
+    CPublishedFile_GetChangeHistory_Request, CPublishedFile_GetDetails_Request,
+    PublishedFileDetails,
 };
 
 pub trait ProgressCallback: Send + Sync {
@@ -164,7 +165,10 @@ impl CdnDownloader {
         }
     }
 
-    pub(crate) async fn fetch_item_details(&mut self, item_id: u64) -> Result<PublishedFileDetails> {
+    pub(crate) async fn fetch_item_details(
+        &mut self,
+        item_id: u64,
+    ) -> Result<PublishedFileDetails> {
         let details_req = CPublishedFile_GetDetails_Request {
             publishedfileids: vec![item_id],
             ..Default::default()
@@ -249,9 +253,9 @@ impl CdnDownloader {
             .await
             .map_err(|e| SteamConnectionError::ApiCallFailed(Box::new(e)))
             .map_err(SteamVentError::Connection)?;
-        code_resp
-            .manifest_request_code
-            .ok_or_else(|| SteamVentError::CdnConnection(CdnConnectionError::ManifestRequestCodeFailed))
+        code_resp.manifest_request_code.ok_or_else(|| {
+            SteamVentError::CdnConnection(CdnConnectionError::ManifestRequestCodeFailed)
+        })
     }
 
     pub(crate) async fn fetch_depot_key(&mut self, app_id: u32, depot_id: u32) -> Result<Vec<u8>> {
@@ -269,7 +273,9 @@ impl CdnDownloader {
             .map_err(|e| SteamConnectionError::ApiCallFailed(Box::new(e)))
             .map_err(SteamVentError::Connection)?;
         if key_resp.eresult() != 1 {
-            return Err(SteamVentError::CdnConnection(CdnConnectionError::DepotKeyFailed(key_resp.eresult())));
+            return Err(SteamVentError::CdnConnection(
+                CdnConnectionError::DepotKeyFailed(key_resp.eresult()),
+            ));
         }
         Ok(key_resp.depot_encryption_key().to_vec())
     }
@@ -284,7 +290,9 @@ impl CdnDownloader {
             .await?;
         let servers = self.cdn_client.cdn_hosts().to_vec();
         if servers.is_empty() {
-            return Err(SteamVentError::CdnConnection(CdnConnectionError::HostResolutionFailed));
+            return Err(SteamVentError::CdnConnection(
+                CdnConnectionError::HostResolutionFailed,
+            ));
         }
 
         let depot_id = app_id;
@@ -309,7 +317,8 @@ impl CdnDownloader {
         let mut depot_id_for_key = app_id;
 
         if let Some(ref m) = metadata
-            && m.filenames_encrypted.unwrap_or(false) {
+            && m.filenames_encrypted.unwrap_or(false)
+        {
             need_key_for_filenames = true;
             depot_id_for_key = m.depot_id.unwrap_or(app_id);
             tracing::debug!(
@@ -345,7 +354,7 @@ impl CdnDownloader {
 
         Ok(DownloadManifest { manifest, depot })
     }
- 
+
     pub async fn fetch_manifest_info(
         &mut self,
         item_id: u64,
@@ -416,12 +425,14 @@ impl CdnDownloader {
                     match compressed_data {
                         Ok(data) => {
                             progress.on_download_progress(task.compressed_size as u64);
-                            let _ = download_tx.send(Ok(CompressedChunk {
-                                depot: task.depot,
-                                file_index: task.file_index,
-                                chunk_index: task.chunk_index,
-                                compressed_data: data,
-                            })).await;
+                            let _ = download_tx
+                                .send(Ok(CompressedChunk {
+                                    depot: task.depot,
+                                    file_index: task.file_index,
+                                    chunk_index: task.chunk_index,
+                                    compressed_data: data,
+                                }))
+                                .await;
                         }
                         Err(e) => {
                             let _ = download_tx.send(Err(e)).await;
@@ -449,18 +460,21 @@ impl CdnDownloader {
 
                             tokio::spawn(async move {
                                 let depot_key = compressed.depot.depot_key.as_deref();
-                                let decoded: Result<Vec<u8>> = CdnClient::decode_chunk(&compressed.compressed_data, depot_key);
+                                let decoded: Result<Vec<u8>> =
+                                    CdnClient::decode_chunk(&compressed.compressed_data, depot_key);
 
                                 match decoded {
                                     Ok(data) => {
                                         let len = data.len() as u64;
                                         progress.on_decode_progress(len);
                                         progress.on_write_progress(len);
-                                        let _ = decode_tx.send(Ok(DownloadedChunk {
-                                            file_index: compressed.file_index,
-                                            chunk_index: compressed.chunk_index,
-                                            data,
-                                        })).await;
+                                        let _ = decode_tx
+                                            .send(Ok(DownloadedChunk {
+                                                file_index: compressed.file_index,
+                                                chunk_index: compressed.chunk_index,
+                                                data,
+                                            }))
+                                            .await;
                                     }
                                     Err(e) => {
                                         let _ = decode_tx.send(Err(e)).await;
@@ -496,27 +510,29 @@ impl CdnDownloader {
                     let total_chunks = file.manifest_info.chunks.len();
 
                     if let Some(chunks) = buffers.get(&chunk.file_index)
-                        && chunks.len() == total_chunks {
-                            let file_path = base_path.join(&file.filename);
-                            let mut file_data: Vec<(usize, Vec<u8>)> = chunks.clone();
-                            file_data.sort_by_key(|(idx, _)| *idx);
+                        && chunks.len() == total_chunks
+                    {
+                        let file_path = base_path.join(&file.filename);
+                        let mut file_data: Vec<(usize, Vec<u8>)> = chunks.clone();
+                        file_data.sort_by_key(|(idx, _)| *idx);
 
-                            let mut full_data = Vec::new();
-                            for (_, data) in file_data {
-                                full_data.extend(data);
-                            }
-
-                            buffers.remove(&chunk.file_index);
-
-                            let output_path = file_path.clone();
-                            let full_data_len = full_data.len();
-                            progress.on_file_complete(&output_path, full_data_len);
-                            tokio::spawn(async move {
-                                let mut file_handle = tokio::fs::File::create(&output_path).await.unwrap();
-                                use tokio::io::AsyncWriteExt;
-                                file_handle.write_all(&full_data).await.unwrap();
-                            });
+                        let mut full_data = Vec::new();
+                        for (_, data) in file_data {
+                            full_data.extend(data);
                         }
+
+                        buffers.remove(&chunk.file_index);
+
+                        let output_path = file_path.clone();
+                        let full_data_len = full_data.len();
+                        progress.on_file_complete(&output_path, full_data_len);
+                        tokio::spawn(async move {
+                            let mut file_handle =
+                                tokio::fs::File::create(&output_path).await.unwrap();
+                            use tokio::io::AsyncWriteExt;
+                            file_handle.write_all(&full_data).await.unwrap();
+                        });
+                    }
                 }
                 Err(e) => {
                     tracing::error!("Error: {}", e);

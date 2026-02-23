@@ -38,7 +38,11 @@ impl CdnClient {
         };
 
         let srv_resp = connection
-            .service_method_with_retry(srv_req, self.config.retry_policy.max_retries, self.config.retry_policy.retry_delay)
+            .service_method_with_retry(
+                srv_req,
+                self.config.retry_policy.max_retries,
+                self.config.retry_policy.retry_delay,
+            )
             .await?;
 
         if srv_resp.servers.is_empty() {
@@ -78,17 +82,23 @@ impl CdnClient {
                     let status = resp.status();
                     let headers = resp.headers().clone();
                     let body_bytes = resp.bytes().await.unwrap_or_default();
-                    let body_preview = String::from_utf8_lossy(&body_bytes[..body_bytes.len().min(256)]);
+                    let body_preview =
+                        String::from_utf8_lossy(&body_bytes[..body_bytes.len().min(256)]);
                     tracing::warn!(
                         "HTTP {} - Headers: {:?} - Body: {}",
                         status,
                         headers
                             .into_iter()
-                            .filter_map(|(k, v)| v.to_str().ok().map(|v| (k.map(|k| k.as_str().to_string()).unwrap_or_default(), v.to_string())))
+                            .filter_map(|(k, v)| v.to_str().ok().map(|v| (
+                                k.map(|k| k.as_str().to_string()).unwrap_or_default(),
+                                v.to_string()
+                            )))
                             .collect::<Vec<_>>(),
                         body_preview
                     );
-                    return Err(SteamVentError::CdnConnection(CdnConnectionError::HttpError { status }));
+                    return Err(SteamVentError::CdnConnection(
+                        CdnConnectionError::HttpError { status },
+                    ));
                 }
                 resp.bytes().await.map_err(SteamVentError::from)
             }
@@ -96,7 +106,11 @@ impl CdnClient {
 
             match fetch_result {
                 Ok(b) => {
-                    tracing::info!("Downloaded manifest from {} ({} bytes)", server_host, b.len());
+                    tracing::info!(
+                        "Downloaded manifest from {} ({} bytes)",
+                        server_host,
+                        b.len()
+                    );
                     return Ok(b.to_vec());
                 }
                 Err(e) => {
@@ -104,7 +118,9 @@ impl CdnClient {
                 }
             }
         }
-        Err(SteamVentError::CdnConnection(CdnConnectionError::AllServersFailed))
+        Err(SteamVentError::CdnConnection(
+            CdnConnectionError::AllServersFailed,
+        ))
     }
 
     pub async fn download_chunk(
@@ -118,7 +134,10 @@ impl CdnClient {
         }
 
         let mut retry_count = 0;
-        let max_attempts = std::cmp::max(self.config.retry_policy.max_retries, server_hosts.len() as u32);
+        let max_attempts = std::cmp::max(
+            self.config.retry_policy.max_retries,
+            server_hosts.len() as u32,
+        );
 
         loop {
             let server_host = &server_hosts[(retry_count as usize) % server_hosts.len()];
@@ -152,7 +171,8 @@ impl CdnClient {
                     let status = resp.status();
                     let headers = resp.headers().clone();
                     let body_bytes = resp.bytes().await.unwrap_or_default();
-                    let body_preview = String::from_utf8_lossy(&body_bytes[..body_bytes.len().min(256)]);
+                    let body_preview =
+                        String::from_utf8_lossy(&body_bytes[..body_bytes.len().min(256)]);
 
                     tracing::warn!(
                         "Retrying chunk {} from {} (attempt {}/{}, status: {}, headers: {:?}, body: {})",
@@ -163,7 +183,10 @@ impl CdnClient {
                         status,
                         headers
                             .into_iter()
-                            .filter_map(|(k, v)| v.to_str().ok().map(|v| (k.map(|k| k.as_str().to_string()).unwrap_or_default(), v.to_string())))
+                            .filter_map(|(k, v)| v.to_str().ok().map(|v| (
+                                k.map(|k| k.as_str().to_string()).unwrap_or_default(),
+                                v.to_string()
+                            )))
                             .collect::<Vec<_>>(),
                         body_preview
                     );
@@ -209,12 +232,17 @@ impl CdnClient {
                     tokio::time::sleep(self.config.retry_policy.retry_delay).await;
                 }
             } else {
-                return Err(SteamVentError::CdnConnection(CdnConnectionError::AllServersFailed));
+                return Err(SteamVentError::CdnConnection(
+                    CdnConnectionError::AllServersFailed,
+                ));
             }
         }
     }
 
-    pub(crate) fn decode_chunk(compressed_data: &[u8], depot_key: Option<&[u8]>) -> Result<Vec<u8>> {
+    pub(crate) fn decode_chunk(
+        compressed_data: &[u8],
+        depot_key: Option<&[u8]>,
+    ) -> Result<Vec<u8>> {
         crate::archive::SteamChunk::new(compressed_data).decode(depot_key)
     }
 }

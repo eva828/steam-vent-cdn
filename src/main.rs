@@ -2,7 +2,7 @@ mod cli;
 
 use clap::Parser;
 use cli::Args;
-use steam_vent_cdn::{SteamClient, CdnDownloader, Result};
+use steam_vent_cdn::{CdnDownloader, Result, SteamClient};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -12,7 +12,12 @@ async fn main() -> Result<()> {
     tracing::debug!("Item ID: {}", args.item_id);
 
     let credentials = cli::resolve_credentials(args.username.clone(), args.password.clone())?;
-    let config = cli::create_config(credentials, args.app_id, args.parallel_download, args.parallel_decode);
+    let config = cli::create_config(
+        credentials,
+        args.app_id,
+        args.parallel_download,
+        args.parallel_decode,
+    );
 
     let steam_client = SteamClient::new(config);
     let steam_session = steam_client.connect().await?;
