@@ -3,15 +3,18 @@ pub mod progress;
 pub mod ui;
 
 pub use args::Args;
-use progress::ProgressManager;
-use steam_vent_cdn::{Config, Credentials, Result, CdnDownloader, DownloadItem};
 use indicatif::MultiProgress;
+use progress::ProgressManager;
 use std::sync::Arc;
+use steam_vent_cdn::{CdnDownloader, Config, Credentials, DownloadItem, Result};
 use tracing_subscriber::Layer;
-use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::prelude::*;
+use tracing_subscriber::util::SubscriberInitExt;
 
-pub fn setup_tracing(verbose: bool, output_dir: &std::path::Path) -> std::result::Result<MultiProgress, Box<dyn std::error::Error>> {
+pub fn setup_tracing(
+    verbose: bool,
+    output_dir: &std::path::Path,
+) -> std::result::Result<MultiProgress, Box<dyn std::error::Error>> {
     std::fs::create_dir_all(output_dir)?;
     let log_path = output_dir.join("steam-vent-cdn.log");
     let log_file = std::fs::File::create(&log_path)?;
@@ -35,7 +38,8 @@ pub fn setup_tracing(verbose: bool, output_dir: &std::path::Path) -> std::result
         .boxed();
 
     let multi = MultiProgress::new();
-    let writer = tracing_indicatif::IndicatifWriter::<tracing_indicatif::writer::Stdout>::new(multi.clone());
+    let writer =
+        tracing_indicatif::IndicatifWriter::<tracing_indicatif::writer::Stdout>::new(multi.clone());
 
     let base_stdout = tracing_subscriber::fmt::layer()
         .with_thread_ids(false)
@@ -115,39 +119,12 @@ pub fn classify_items(items: Vec<DownloadItem>) -> (Vec<DownloadItem>, Vec<Downl
     (directories, files)
 }
 
-pub async fn create_directories(
-    output: &std::path::Path,
-    app_id: u32,
+pub async fn run_list_versions_pipeline(
+    downloader: &mut CdnDownloader,
     item_id: u64,
-    directories: &[DownloadItem],
 ) -> Result<()> {
-    for dir in directories {
-        let output_path = output
-            .join(app_id.to_string())
-            .join(item_id.to_string())
-            .join(&dir.filename);
-
-        tokio::fs::create_dir_all(&output_path).await?;
-    }
-    Ok(())
-}
-
-pub async fn prepare_output_directories(
-    output: &std::path::Path,
-    app_id: u32,
-    item_id: u64,
-    files: &[DownloadItem],
-) -> Result<()> {
-    for file in files {
-        let output_path = output
-            .join(app_id.to_string())
-            .join(item_id.to_string())
-            .join(&file.filename);
-
-        if let Some(parent) = output_path.parent() {
-            tokio::fs::create_dir_all(parent).await?;
-        }
-    }
+    let versions = downloader.fetch_change_history(item_id).await?;
+    ui::display_version_history(item_id, &versions);
     Ok(())
 }
 
@@ -156,16 +133,43 @@ pub async fn run_download_pipeline(
     downloader: &mut CdnDownloader,
     multi: &MultiProgress,
 ) -> Result<()> {
-    let manifest_files = downloader.fetch_manifest_info(args.item_id).await?;
+    let versions = downloader.fetch_change_history(args.item_id).await?;
 
-    let items: Vec<DownloadItem> = manifest_files
-        .into_iter()
-        .map(|(filename, manifest_info)| DownloadItem {
-            item_id: args.item_id,
-            filename,
-            manifest_info,
-        })
-        .collect();
+    let timestamp = if let Some(ts) = args.version {
+        ts
+    } else {
+        versions.first().map(|v| v.timestamp).ok_or_else(|| {
+            steam_vent_cdn::SteamVentError::InvalidData("No versions found".to_string())
+        })?
+    };
+
+    let version_info = versions
+        .iter()
+        .find(|v| v.timestamp == timestamp)
+        .ok_or_else(|| {
+            steam_vent_cdn::SteamVentError::InvalidData(format!(
+                "Timestamp {} not found in version history",
+                timestamp
+            ))
+        })?;
+
+    tracing::info!("Downloading version with timestamp: {}", timestamp);
+    tracing::info!("Description: {}", version_info.description);
+
+    let details = downloader.fetch_item_details(args.item_id).await?;
+    let app_id = details.consumer_appid.unwrap_or(args.app_id);
+
+    let manifest_data = downloader
+        .fetch_manifest_by_id(version_info.manifest_id, app_id)
+        .await?;
+
+    let items = manifest_data.to_download_items(args.item_id)?;
+
+    let base_path = args
+        .output
+        .join(args.app_id.to_string())
+        .join(args.item_id.to_string())
+        .join(timestamp.to_string());
 
     let (directories, files) = classify_items(items);
 
@@ -174,18 +178,18 @@ pub async fn run_download_pipeline(
         return Ok(());
     }
 
-    create_directories(&args.output, args.app_id, args.item_id, &directories).await?;
-    prepare_output_directories(&args.output, args.app_id, args.item_id, &files).await?;
+    for dir in directories {
+        let output_path = base_path.join(&dir.filename);
+
+        tokio::fs::create_dir_all(&output_path).await?;
+    }
 
     let progress = ProgressManager::new(multi, &files);
     let progress = Arc::new(progress);
 
-    let base_path = args
-        .output
-        .join(args.app_id.to_string())
-        .join(args.item_id.to_string());
-
-    downloader.download_to_directory(&files, &base_path, progress.clone()).await?;
+    downloader
+        .download_to_directory(&files, &base_path, progress.clone())
+        .await?;
 
     progress.finish();
     Ok(())

@@ -19,7 +19,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut downloader = CdnDownloader::new(steam_session);
 
-    cli::run_download_pipeline(&args, &mut downloader, &multi).await?;
+    if args.list_versions {
+        cli::run_list_versions_pipeline(&mut downloader, args.item_id).await?;
+    } else {
+        cli::run_download_pipeline(&args, &mut downloader, &multi).await?;
+    }
 
     Ok(())
 }

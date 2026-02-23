@@ -11,7 +11,7 @@ pub use connection::{SteamClient, SteamSession};
 pub use downloader::{
     CdnDownloader, DownloadItem, ProgressCallback,
     ChunkDownloadTask, CompressedChunk, DownloadedChunk,
-    DepotContext, FileManifestInfo, ChunkInfo,
+    DepotContext, FileManifestInfo, ChunkInfo, VersionInfo,
 };
 pub use error::{Result, SteamVentError};
 pub use archive::SteamChunk;

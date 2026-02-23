@@ -1,4 +1,26 @@
-use steam_vent_cdn::DownloadItem;
+use steam_vent_cdn::{DownloadItem, VersionInfo};
+
+fn format_timestamp(timestamp: u32) -> String {
+    use std::time::UNIX_EPOCH;
+    let duration = std::time::Duration::from_secs(timestamp as u64);
+    if let Some(_datetime) = UNIX_EPOCH.checked_add(duration) {
+        let secs_since_epoch = timestamp as u64;
+        let days = secs_since_epoch / 86400;
+        let year = 1970 + (days / 365) as i32;
+        let remaining_days = days % 365;
+        let month = (remaining_days / 30 + 1) as u32;
+        let day = (remaining_days % 30 + 1) as u32;
+        let hour = (secs_since_epoch % 86400 / 3600) as u32;
+        let minute = (secs_since_epoch % 3600 / 60) as u32;
+        let second = (secs_since_epoch % 60) as u32;
+        format!(
+            "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+            year, month, day, hour, minute, second
+        )
+    } else {
+        format!("Unknown")
+    }
+}
 
 pub fn format_file_size(size: u64) -> String {
     if size < 1024 {
@@ -26,4 +48,28 @@ pub fn display_file_list(item_id: u64, files: &[DownloadItem]) {
     }
 
     tracing::info!("Total: {} files", files.len());
+}
+
+pub fn display_version_history(item_id: u64, versions: &[VersionInfo]) {
+    tracing::info!("Workshop item {} version history:", item_id);
+    tracing::info!("{:<20} | {:<20} | Description", "Timestamp", "Date");
+    tracing::info!(
+        "{:-<20}-+-{:-<20}-+-{}",
+        "--------------------",
+        "--------------------",
+        "------------------------"
+    );
+
+    for (i, version) in versions.iter().enumerate() {
+        let date = format_timestamp(version.timestamp);
+        let latest_mark = if i == 0 { " [LATEST]" } else { "" };
+        let description = if version.description.is_empty() {
+            "No description".to_string()
+        } else {
+            format!("{}{}", version.description, latest_mark)
+        };
+        tracing::info!("{:<20} | {:<20} | {}", version.timestamp, date, description);
+    }
+
+    tracing::info!("Total: {} versions", versions.len());
 }
