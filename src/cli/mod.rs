@@ -6,7 +6,7 @@ pub use args::Args;
 use indicatif::MultiProgress;
 use progress::ProgressManager;
 use std::sync::Arc;
-use steam_vent_cdn::{CdnDownloader, Config, Credentials, DownloadItem, Result};
+use steam_vent_cdn::{CdnDownloader, Config, Credentials, DownloadItem, RetryPolicy, Result};
 use tracing_subscriber::Layer;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -93,6 +93,11 @@ pub fn create_config(
         .app_id(app_id)
         .parallel_download(parallel_download)
         .parallel_decode(parallel_decode)
+        .timeout(std::time::Duration::from_secs(30))
+        .retry_policy(RetryPolicy {
+            max_retries: 3,
+            retry_delay: std::time::Duration::from_secs(1),
+        })
         .build()
 }
 
@@ -156,14 +161,15 @@ pub async fn run_download_pipeline(
     tracing::info!("Downloading version with timestamp: {}", timestamp);
     tracing::info!("Description: {}", version_info.description);
 
-    let details = downloader.fetch_item_details(args.item_id).await?;
-    let app_id = details.consumer_appid.unwrap_or(args.app_id);
-
-    let manifest_data = downloader
-        .fetch_manifest_by_id(version_info.manifest_id, app_id)
-        .await?;
-
-    let items = manifest_data.to_download_items(args.item_id)?;
+    let file_map = downloader.fetch_manifest_info(args.item_id).await?;
+    let items: Vec<DownloadItem> = file_map
+        .into_iter()
+        .map(|(filename, manifest_info)| DownloadItem {
+            item_id: args.item_id,
+            filename,
+            manifest_info,
+        })
+        .collect();
 
     let base_path = args
         .output

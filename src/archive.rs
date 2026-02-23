@@ -239,7 +239,7 @@ impl<'a> SteamChunk<'a> {
         Self { data }
     }
 
-    pub fn decrypt(&self, key: &[u8]) -> Result<Vec<u8>> {
+    fn decrypt(&self, key: &[u8]) -> Result<Vec<u8>> {
         if self.data.len() < 16 {
             return Ok(self.data.to_vec());
         }
@@ -269,7 +269,7 @@ impl<'a> SteamChunk<'a> {
         }
     }
 
-    pub fn get_extractor(&self) -> Result<Box<dyn ArchiveExtractor + 'a>> {
+    fn get_extractor(&self) -> Result<Box<dyn ArchiveExtractor + 'a>> {
         match self.data {
             d if d.starts_with(ZipArchiveExtractor::MAGIC) => {
                 Ok(Box::new(ZipArchiveExtractor::new(d)?))
