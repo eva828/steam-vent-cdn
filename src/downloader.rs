@@ -509,11 +509,11 @@ impl CdnDownloader {
                     let file = &files[chunk.file_index];
                     let total_chunks = file.manifest_info.chunks.len();
 
-                    if let Some(chunks) = buffers.get(&chunk.file_index)
+                    if let Some(chunks) = buffers.get_mut(&chunk.file_index)
                         && chunks.len() == total_chunks
                     {
                         let file_path = base_path.join(&file.filename);
-                        let mut file_data: Vec<(usize, Vec<u8>)> = chunks.clone();
+                        let mut file_data: Vec<(usize, Vec<u8>)> = std::mem::take(chunks);
                         file_data.sort_by_key(|(idx, _)| *idx);
 
                         let mut full_data = Vec::new();
@@ -544,11 +544,11 @@ impl CdnDownloader {
             }
         }
 
-        for (file_index, buffers) in chunk_buffers.lock().await.iter() {
+        for (file_index, buffers) in std::mem::take(&mut *chunk_buffers.lock().await).into_iter() {
             if !buffers.is_empty() {
-                let file = &files[*file_index];
+                let file = &files[file_index];
                 let file_path = base_path.join(&file.filename);
-                let mut file_data: Vec<(usize, Vec<u8>)> = buffers.clone();
+                let mut file_data: Vec<(usize, Vec<u8>)> = buffers;
                 file_data.sort_by_key(|(idx, _)| *idx);
 
                 let mut full_data = Vec::new();
