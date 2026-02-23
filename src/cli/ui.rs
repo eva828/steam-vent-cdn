@@ -1,25 +1,11 @@
 use steam_vent_cdn::{DownloadItem, VersionInfo};
 
 fn format_timestamp(timestamp: u32) -> String {
-    use std::time::UNIX_EPOCH;
-    let duration = std::time::Duration::from_secs(timestamp as u64);
-    if let Some(_datetime) = UNIX_EPOCH.checked_add(duration) {
-        let secs_since_epoch = timestamp as u64;
-        let days = secs_since_epoch / 86400;
-        let year = 1970 + (days / 365) as i32;
-        let remaining_days = days % 365;
-        let month = (remaining_days / 30 + 1) as u32;
-        let day = (remaining_days % 30 + 1) as u32;
-        let hour = (secs_since_epoch % 86400 / 3600) as u32;
-        let minute = (secs_since_epoch % 3600 / 60) as u32;
-        let second = (secs_since_epoch % 60) as u32;
-        format!(
-            "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
-            year, month, day, hour, minute, second
-        )
-    } else {
-        "Unknown".to_string()
-    }
+    use chrono::{DateTime, Utc};
+    let datetime = DateTime::<Utc>::from_timestamp(timestamp as i64, 0);
+    datetime
+        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+        .unwrap_or_else(|| "Unknown".to_string())
 }
 
 pub fn format_file_size(size: u64) -> String {
