@@ -103,7 +103,7 @@ pub fn create_config(
 
 const FLAG_DIRECTORY: u32 = 0x40;
 
-pub fn classify_items(items: Vec<DownloadItem>) -> (Vec<DownloadItem>, Vec<DownloadItem>) {
+pub(crate) fn classify_items(items: Vec<DownloadItem>) -> (Vec<DownloadItem>, Vec<DownloadItem>) {
     let mut directories = Vec::new();
     let mut files = Vec::new();
 

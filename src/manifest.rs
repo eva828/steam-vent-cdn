@@ -1,8 +1,8 @@
 use crate::archive::ArchiveExtractor;
 use crate::error::{Result, SteamVentError};
+use aes::cipher::{block_padding::Pkcs7, BlockDecrypt, BlockDecryptMut, KeyInit, KeyIvInit};
 use aes::Aes256;
-use aes::cipher::{BlockDecrypt, BlockDecryptMut, KeyInit, KeyIvInit, block_padding::Pkcs7};
-use base64::{Engine as _, engine::general_purpose};
+use base64::{engine::general_purpose, Engine as _};
 use cbc::Decryptor;
 use steam_vent_proto::content_manifest::{ContentManifestMetadata, ContentManifestPayload};
 use steam_vent_proto::protobuf::Message;
@@ -43,6 +43,7 @@ fn decrypt_string(
     let mut iv_bytes = [0u8; 16];
     iv_bytes.copy_from_slice(&encrypted_bytes[..16]);
     let mut iv_block = aes::cipher::generic_array::GenericArray::from_mut_slice(&mut iv_bytes);
+    #[allow(clippy::needless_borrow)]
     cipher_ecb.decrypt_block(&mut iv_block);
 
     let encrypted_data = &encrypted_bytes[16..];
@@ -54,7 +55,7 @@ fn decrypt_string(
     }
 
     let mut buf = encrypted_data.to_vec();
-    let decryptor = Decryptor::<Aes256>::new(&aes_key, &iv_bytes.into());
+    let decryptor = Decryptor::<Aes256>::new(aes_key, (&iv_bytes).into());
     let plaintext = decryptor
         .decrypt_padded_mut::<Pkcs7>(&mut buf)
         .map_err(|e| {
@@ -69,7 +70,7 @@ fn decrypt_string(
     Ok(String::from_utf8_lossy(clean_bytes).into_owned())
 }
 
-pub fn parse_manifest(
+pub(crate) fn parse_manifest(
     payload_bytes: &[u8],
 ) -> Result<(ContentManifestPayload, Option<ContentManifestMetadata>)> {
     let payload_bytes_vec;
@@ -151,7 +152,7 @@ pub fn parse_manifest(
     Ok((manifest, metadata))
 }
 
-pub fn decrypt_manifest_filenames(
+pub(crate) fn decrypt_manifest_filenames(
     manifest: &mut ContentManifestPayload,
     depot_key: &[u8],
 ) -> Result<()> {
@@ -163,16 +164,18 @@ pub fn decrypt_manifest_filenames(
     }
 
     let aes_key = aes::cipher::generic_array::GenericArray::from_slice(depot_key);
-    let cipher_ecb = Aes256::new(&aes_key);
+    let cipher_ecb = Aes256::new(aes_key);
 
     for mapping in &mut manifest.mappings {
         if let Some(enc_val) = mapping.filename.as_ref() {
+            #[allow(clippy::needless_borrow)]
             let decrypted = decrypt_string(enc_val, &aes_key, &cipher_ecb)?;
             tracing::debug!("Decrypted filename: {} -> {}", enc_val, decrypted);
             mapping.filename = Some(decrypted);
         }
 
         if let Some(enc_val) = mapping.linktarget.as_ref() {
+            #[allow(clippy::needless_borrow)]
             let decrypted = decrypt_string(enc_val, &aes_key, &cipher_ecb)?;
             tracing::debug!("Decrypted linktarget: {} -> {}", enc_val, decrypted);
             mapping.linktarget = Some(decrypted);

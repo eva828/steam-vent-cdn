@@ -6,11 +6,11 @@ use std::io::{Cursor, Read};
 
 type Aes256CbcDec = cbc::Decryptor<Aes256>;
 
-pub trait ArchiveExtractor {
+pub(crate) trait ArchiveExtractor {
     fn extract(&self) -> Result<Vec<u8>>;
 }
 
-pub struct ZipArchiveExtractor<'a> {
+pub(crate) struct ZipArchiveExtractor<'a> {
     data: &'a [u8],
 }
 
@@ -30,8 +30,7 @@ impl<'a> ArchiveExtractor for ZipArchiveExtractor<'a> {
             .by_index(0)
             .map_err(|e| SteamVentError::Manifest(e.to_string()))?;
         let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer)
-            .map_err(|e| SteamVentError::Io(e))?;
+        file.read_to_end(&mut buffer).map_err(SteamVentError::Io)?;
         tracing::debug!(
             "ZIP extracted successfully: {} bytes input -> {} bytes output",
             self.data.len(),
@@ -41,7 +40,7 @@ impl<'a> ArchiveExtractor for ZipArchiveExtractor<'a> {
     }
 }
 
-pub struct ZstdArchiveExtractor<'a> {
+pub(crate) struct ZstdArchiveExtractor<'a> {
     data: &'a [u8],
 }
 
@@ -74,7 +73,7 @@ impl<'a> ArchiveExtractor for ZstdArchiveExtractor<'a> {
     }
 }
 
-pub struct VZaArchiveExtractor<'a> {
+pub(crate) struct VZaArchiveExtractor<'a> {
     data: &'a [u8],
 }
 
@@ -144,8 +143,9 @@ impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
 
         let mut decompressed = Vec::with_capacity(uncompressed_size);
         let mut options: lzma_rs::decompress::Options = Default::default();
-        options.unpacked_size =
+        let unpacked_size =
             lzma_rs::decompress::UnpackedSize::UseProvided(Some(uncompressed_size as u64));
+        options.unpacked_size = unpacked_size;
 
         // In VZa format, the properties and dictionary size (5 bytes) are at offset 7,
         // followed immediately by the compressed stream at offset 12.
@@ -170,16 +170,16 @@ impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
             );
             Ok(decompressed)
         } else {
-            return Err(SteamVentError::Cdn(format!(
+            Err(SteamVentError::Cdn(format!(
                 "VZa decode incomplete: written={}, expected={}",
                 decompressed.len(),
                 uncompressed_size
-            )));
+            )))
         }
     }
 }
 
-pub struct LzmaArchiveExtractor<'a> {
+pub(crate) struct LzmaArchiveExtractor<'a> {
     data: &'a [u8],
     offset: usize,
 }
@@ -208,7 +208,7 @@ impl<'a> ArchiveExtractor for LzmaArchiveExtractor<'a> {
     }
 }
 
-pub struct RawArchiveExtractor<'a> {
+pub(crate) struct RawArchiveExtractor<'a> {
     data: &'a [u8],
 }
 

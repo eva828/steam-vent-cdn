@@ -18,7 +18,7 @@ fn format_timestamp(timestamp: u32) -> String {
             year, month, day, hour, minute, second
         )
     } else {
-        format!("Unknown")
+        "Unknown".to_string()
     }
 }
 

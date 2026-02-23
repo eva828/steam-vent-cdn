@@ -48,7 +48,7 @@ pub struct DownloadedChunk {
 
 pub struct CdnDownloader {
     steam_client: SteamSession,
-    pub cdn_client: CdnClient,
+    pub(crate) cdn_client: CdnClient,
 }
 
 #[derive(Debug, Clone)]
@@ -59,13 +59,13 @@ pub struct DepotContext {
 }
 
 #[derive(Debug, Clone)]
-pub struct DownloadManifest {
+pub(crate) struct DownloadManifest {
     pub manifest: ContentManifestPayload,
     pub depot: Arc<DepotContext>,
 }
 
 impl DownloadManifest {
-    pub fn to_file_map(&self) -> Result<HashMap<String, FileManifestInfo>> {
+    pub(crate) fn to_file_map(&self) -> Result<HashMap<String, FileManifestInfo>> {
         let mut files = HashMap::new();
 
         for mapping in &self.manifest.mappings {
@@ -108,7 +108,8 @@ impl DownloadManifest {
         Ok(files)
     }
 
-    pub fn to_download_items(&self, item_id: u64) -> Result<Vec<DownloadItem>> {
+    #[allow(dead_code)]
+    pub(crate) fn to_download_items(&self, item_id: u64) -> Result<Vec<DownloadItem>> {
         let file_map = self.to_file_map()?;
         Ok(file_map
             .into_iter()
@@ -163,7 +164,7 @@ impl CdnDownloader {
         }
     }
 
-    pub async fn fetch_item_details(&mut self, item_id: u64) -> Result<PublishedFileDetails> {
+    pub(crate) async fn fetch_item_details(&mut self, item_id: u64) -> Result<PublishedFileDetails> {
         let details_req = CPublishedFile_GetDetails_Request {
             publishedfileids: vec![item_id],
             ..Default::default()
@@ -226,7 +227,7 @@ impl CdnDownloader {
         Ok(versions)
     }
 
-    async fn fetch_manifest_request_code(
+    pub(crate) async fn fetch_manifest_request_code(
         &mut self,
         app_id: u32,
         depot_id: u32,
@@ -251,7 +252,7 @@ impl CdnDownloader {
             .ok_or_else(|| SteamVentError::Cdn("Failed to get manifest request code".to_string()))
     }
 
-    async fn fetch_depot_key(&mut self, app_id: u32, depot_id: u32) -> Result<Vec<u8>> {
+    pub(crate) async fn fetch_depot_key(&mut self, app_id: u32, depot_id: u32) -> Result<Vec<u8>> {
         tracing::debug!("Requesting depot decryption key");
 
         let mut key_req = CMsgClientGetDepotDecryptionKey::new();
@@ -273,7 +274,7 @@ impl CdnDownloader {
         Ok(key_resp.depot_encryption_key().to_vec())
     }
 
-    pub async fn fetch_manifest_by_id(
+    pub(crate) async fn fetch_manifest_by_id(
         &mut self,
         manifest_id: u64,
         app_id: u32,
@@ -305,17 +306,16 @@ impl CdnDownloader {
 
         let mut depot_key_opt = None;
         let mut need_key_for_filenames = false;
-        let mut depot_id_for_key = app_id as u32;
+        let mut depot_id_for_key = app_id;
 
-        if let Some(ref m) = metadata {
-            if m.filenames_encrypted.unwrap_or(false) {
-                need_key_for_filenames = true;
-                depot_id_for_key = m.depot_id.unwrap_or(app_id as u32);
-                tracing::debug!(
-                    "Manifest filenames are encrypted (depot_id: {}).",
-                    depot_id_for_key
-                );
-            }
+        if let Some(ref m) = metadata
+            && m.filenames_encrypted.unwrap_or(false) {
+            need_key_for_filenames = true;
+            depot_id_for_key = m.depot_id.unwrap_or(app_id);
+            tracing::debug!(
+                "Manifest filenames are encrypted (depot_id: {}).",
+                depot_id_for_key
+            );
         }
 
         match self.fetch_depot_key(app_id, depot_id_for_key).await {
@@ -482,6 +482,7 @@ impl CdnDownloader {
 
         drop(download_tx);
 
+        #[allow(clippy::type_complexity)]
         let chunk_buffers: Arc<tokio::sync::Mutex<HashMap<usize, Vec<(usize, Vec<u8>)>>>> =
             Arc::new(tokio::sync::Mutex::new(HashMap::new()));
 
@@ -497,8 +498,8 @@ impl CdnDownloader {
                     let file = &files[chunk.file_index];
                     let total_chunks = file.manifest_info.chunks.len();
 
-                    if let Some(chunks) = buffers.get(&chunk.file_index) {
-                        if chunks.len() == total_chunks {
+                    if let Some(chunks) = buffers.get(&chunk.file_index)
+                        && chunks.len() == total_chunks {
                             let file_path = base_path.join(&file.filename);
                             let mut file_data: Vec<(usize, Vec<u8>)> = chunks.clone();
                             file_data.sort_by_key(|(idx, _)| *idx);
@@ -519,7 +520,6 @@ impl CdnDownloader {
                                 file_handle.write_all(&full_data).await.unwrap();
                             });
                         }
-                    }
                 }
                 Err(e) => {
                     tracing::error!("Error: {}", e);

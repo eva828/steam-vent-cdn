@@ -1,15 +1,13 @@
 use std::time::Duration;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub enum Credentials {
+    #[default]
     Anonymous,
-    UserPass { username: String, password: String },
-}
-
-impl Default for Credentials {
-    fn default() -> Self {
-        Self::Anonymous
-    }
+    UserPass {
+        username: String,
+        password: String,
+    },
 }
 
 #[derive(Debug, Clone)]

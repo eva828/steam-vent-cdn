@@ -5,7 +5,7 @@ use reqwest::Client as HttpClient;
 use steam_vent_proto::steammessages_contentsystem_steamclient::CContentServerDirectory_GetServersForSteamPipe_Request;
 
 #[derive(Clone)]
-pub struct CdnClient {
+pub(crate) struct CdnClient {
     http_client: HttpClient,
     cdn_hosts: Vec<String>,
     config: Config,
@@ -218,7 +218,7 @@ impl CdnClient {
         }
     }
 
-    pub fn decode_chunk(compressed_data: &[u8], depot_key: Option<&[u8]>) -> Result<Vec<u8>> {
+    pub(crate) fn decode_chunk(compressed_data: &[u8], depot_key: Option<&[u8]>) -> Result<Vec<u8>> {
         crate::archive::SteamChunk::new(compressed_data).decode(depot_key)
     }
 }

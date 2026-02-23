@@ -74,7 +74,7 @@ impl SteamSession {
     }
 }
 
-pub trait ConnectionExt: steam_vent::ConnectionTrait + Sync {
+pub(crate) trait ConnectionExt: steam_vent::ConnectionTrait + Sync {
     fn service_method_with_retry<'a, R>(
         &'a self,
         req: R,
