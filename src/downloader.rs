@@ -387,8 +387,14 @@ impl CdnDownloader {
         let download_sem = Arc::new(tokio::sync::Semaphore::new(parallel_download));
         let decode_sem = Arc::new(tokio::sync::Semaphore::new(parallel_decode));
 
-        let (download_tx, download_rx) = tokio::sync::mpsc::channel::<Result<CompressedChunk>>(32);
-        let (decode_tx, mut decode_rx) = tokio::sync::mpsc::channel::<Result<DownloadedChunk>>(32);
+        // Fix 2: Dynamic channel buffer sizes to prevent backpressure stalls
+        let download_channel_size = (parallel_download + parallel_decode).max(64);
+        let decode_channel_size = (parallel_decode * 2).max(32);
+
+        let (download_tx, mut download_rx) =
+            tokio::sync::mpsc::channel::<Result<CompressedChunk>>(download_channel_size);
+        let (decode_tx, mut decode_rx) =
+            tokio::sync::mpsc::channel::<Result<DownloadedChunk>>(decode_channel_size);
 
         let cdn_client = self.cdn_client.clone();
 
@@ -431,31 +437,54 @@ impl CdnDownloader {
             });
         }
 
-        let download_rx = Arc::new(tokio::sync::Mutex::new(download_rx));
-        let decode_sem_clone = decode_sem.clone();
-        let decode_tx_clone = decode_tx.clone();
+        // Fix 4: Drop the original download_tx so download_rx closes when all spawned senders finish
+        drop(download_tx);
 
-        tokio::spawn({
+        // Fix 3 & 4: Move semaphore acquisition inside spawn, and use decode_tx directly
+        //            (no clone needed at dispatcher level — clone inside loop for each task)
+        let _decode_dispatcher = tokio::spawn({
             let progress = progress.clone();
+            let decode_sem = decode_sem.clone();
             async move {
-                loop {
-                    let mut rx = download_rx.lock().await;
-                    match rx.recv().await {
-                        Some(Ok(compressed)) => {
-                            drop(rx);
-                            let _permit = decode_sem_clone.acquire().await.unwrap();
-                            let decode_tx = decode_tx_clone.clone();
+                while let Some(result) = download_rx.recv().await {
+                    match result {
+                        Ok(compressed) => {
+                            let decode_tx = decode_tx.clone();
                             let progress = progress.clone();
+                            let decode_sem = decode_sem.clone();
 
+                            // Fix 3: Spawn immediately without waiting for semaphore.
+                            // Semaphore is acquired inside the spawned task so the recv
+                            // loop can continue draining the download channel.
                             tokio::spawn(async move {
-                                let depot_key = compressed.depot.depot_key.as_deref();
-                                let decoded: Result<Vec<u8>> =
+                                let _permit = decode_sem.acquire().await.unwrap();
+
+                                // Fix 1: Move CPU-bound decode (AES + LZMA + checksum)
+                                // to a blocking thread pool so it doesn't starve async I/O workers.
+                                let depot_key = compressed.depot.depot_key.clone();
+                                let compressed_data = compressed.compressed_data;
+                                let uncompressed_size = compressed.uncompressed_size;
+                                let crc = compressed.crc;
+
+                                let decoded = tokio::task::spawn_blocking(move || {
                                     CdnClient::decode_chunk(
-                                        &compressed.compressed_data,
-                                        depot_key,
-                                        compressed.uncompressed_size,
-                                        compressed.crc,
-                                    );
+                                        &compressed_data,
+                                        depot_key.as_deref(),
+                                        uncompressed_size,
+                                        crc,
+                                    )
+                                })
+                                .await;
+
+                                let decoded = match decoded {
+                                    Ok(inner) => inner,
+                                    Err(join_err) => {
+                                        Err(SteamVentError::InvalidData(format!(
+                                            "Decode task panicked: {}",
+                                            join_err
+                                        )))
+                                    }
+                                };
 
                                 match decoded {
                                     Ok(data) => {
@@ -476,16 +505,16 @@ impl CdnDownloader {
                                 }
                             });
                         }
-                        Some(Err(e)) => {
+                        Err(e) => {
                             let _ = decode_tx.send(Err(e)).await;
                         }
-                        None => break,
                     }
                 }
+                // decode_tx is dropped here when the loop ends, which is correct.
+                // All clones inside spawned decode tasks will also eventually drop,
+                // causing decode_rx to return None and terminate the write loop.
             }
         });
-
-        drop(download_tx);
 
         #[allow(clippy::type_complexity)]
         let chunk_buffers: Arc<tokio::sync::Mutex<HashMap<usize, Vec<(usize, Vec<u8>)>>>> =
