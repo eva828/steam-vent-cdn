@@ -21,13 +21,9 @@ pub fn format_file_size(size: u64) -> String {
 pub fn display_file_list(item_id: u64, files: &[DownloadItem]) {
     tracing::info!("Workshop item {} files:", item_id);
     for file in files {
-        let size = file.manifest_info.size.unwrap_or_else(|| {
-            file.manifest_info
-                .chunks
-                .iter()
-                .map(|c| c.uncompressed_size as u64)
-                .sum()
-        });
+        let size = file
+            .size
+            .unwrap_or_else(|| file.chunks.iter().map(|c| c.uncompressed_size as u64).sum());
 
         let size_str = format_file_size(size);
         tracing::info!("  - {} ({})", file.filename, size_str);

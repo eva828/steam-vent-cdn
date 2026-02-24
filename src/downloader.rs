@@ -70,8 +70,8 @@ pub(crate) struct DownloadManifest {
 }
 
 impl DownloadManifest {
-    pub(crate) fn to_file_map(&self) -> Result<HashMap<String, FileManifestInfo>> {
-        let mut files = HashMap::new();
+    pub(crate) fn to_download_items(&self) -> Result<Vec<DownloadItem>> {
+        let mut items = Vec::new();
 
         for mapping in &self.manifest.mappings {
             let filename = mapping.filename.clone().unwrap_or_default();
@@ -104,18 +104,16 @@ impl DownloadManifest {
                 })
                 .collect::<Result<Vec<_>>>()?;
 
-            files.insert(
+            items.push(DownloadItem {
                 filename,
-                FileManifestInfo {
-                    chunks,
-                    flags: mapping.flags,
-                    size: mapping.size,
-                    depot: Arc::clone(&self.depot),
-                },
-            );
+                chunks,
+                flags: mapping.flags,
+                size: mapping.size,
+                depot: Arc::clone(&self.depot),
+            });
         }
 
-        Ok(files)
+        Ok(items)
     }
 }
 
@@ -128,17 +126,12 @@ pub struct ChunkInfo {
 }
 
 #[derive(Debug, Clone)]
-pub struct FileManifestInfo {
+pub struct DownloadItem {
+    pub filename: String,
     pub chunks: Vec<ChunkInfo>,
     pub flags: Option<u32>,
     pub size: Option<u64>,
     pub depot: Arc<DepotContext>,
-}
-
-#[derive(Debug, Clone)]
-pub struct DownloadItem {
-    pub filename: String,
-    pub manifest_info: FileManifestInfo,
 }
 
 #[derive(Debug, Clone)]
@@ -350,7 +343,7 @@ impl CdnDownloader {
     pub async fn fetch_manifest_info(
         &mut self,
         item_id: u64,
-    ) -> Result<HashMap<String, FileManifestInfo>> {
+    ) -> Result<Vec<DownloadItem>> {
         let details = self.fetch_item_details(item_id).await?;
 
         let title = details.title.as_deref().unwrap_or("Unknown");
@@ -363,7 +356,7 @@ impl CdnDownloader {
         let app_id = details.consumer_appid.unwrap_or(config_app_id);
 
         let manifest_data = self.fetch_manifest_by_id(manifest_id, app_id).await?;
-        manifest_data.to_file_map()
+        manifest_data.to_download_items()
     }
 
     pub async fn download_to_directory(
@@ -374,8 +367,8 @@ impl CdnDownloader {
     ) -> Result<()> {
         let mut tasks: Vec<ChunkDownloadTask> = Vec::new();
         for (file_index, file) in files.iter().enumerate() {
-            let depot = Arc::clone(&file.manifest_info.depot);
-            for (chunk_index, chunk) in file.manifest_info.chunks.iter().enumerate() {
+            let depot = Arc::clone(&file.depot);
+            for (chunk_index, chunk) in file.chunks.iter().enumerate() {
                 tasks.push(ChunkDownloadTask {
                     chunk_id: hex::encode(&chunk.sha),
                     depot: Arc::clone(&depot),
@@ -508,7 +501,7 @@ impl CdnDownloader {
                         .push((chunk.chunk_index, chunk.data));
 
                     let file = &files[chunk.file_index];
-                    let total_chunks = file.manifest_info.chunks.len();
+                    let total_chunks = file.chunks.len();
 
                     if let Some(chunks) = buffers.get_mut(&chunk.file_index)
                         && chunks.len() == total_chunks

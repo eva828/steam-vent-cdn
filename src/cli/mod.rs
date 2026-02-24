@@ -116,7 +116,7 @@ pub(crate) fn classify_items(items: Vec<DownloadItem>) -> (Vec<DownloadItem>, Ve
     let mut files = Vec::new();
 
     for item in items {
-        if item.manifest_info.flags.unwrap_or(0) & FLAG_DIRECTORY != 0 {
+        if item.flags.unwrap_or(0) & FLAG_DIRECTORY != 0 {
             directories.push(item);
         } else {
             files.push(item);
@@ -169,14 +169,7 @@ pub async fn run_download_pipeline(
     tracing::info!("Downloading version with timestamp: {}", timestamp);
     tracing::info!("Description: {}", version_info.description);
 
-    let file_map = downloader.fetch_manifest_info(args.item_id).await?;
-    let items: Vec<DownloadItem> = file_map
-        .into_iter()
-        .map(|(filename, manifest_info)| DownloadItem {
-            filename,
-            manifest_info,
-        })
-        .collect();
+    let items = downloader.fetch_manifest_info(args.item_id).await?;
 
     let base_path = args
         .output

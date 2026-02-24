@@ -15,8 +15,7 @@ impl ProgressManager {
         let total_compressed: u64 = files
             .iter()
             .map(|f| {
-                f.manifest_info
-                    .chunks
+                f.chunks
                     .iter()
                     .map(|c| c.compressed_size as u64)
                     .sum::<u64>()
@@ -26,8 +25,7 @@ impl ProgressManager {
         let total_decompressed: u64 = files
             .iter()
             .map(|f| {
-                f.manifest_info
-                    .chunks
+                f.chunks
                     .iter()
                     .map(|c| c.uncompressed_size as u64)
                     .sum::<u64>()

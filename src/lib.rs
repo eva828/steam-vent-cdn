@@ -11,6 +11,6 @@ pub use config::{Config, ConfigBuilder, Credentials, RetryPolicy};
 pub use connection::{SteamClient, SteamSession};
 pub use downloader::{
     CdnDownloader, ChunkDownloadTask, ChunkInfo, CompressedChunk, DepotContext, DownloadItem,
-    DownloadedChunk, FileManifestInfo, ProgressCallback, VersionInfo,
+    DownloadedChunk, ProgressCallback, VersionInfo,
 };
 pub use error::{ManifestError, Result, SteamVentError};
