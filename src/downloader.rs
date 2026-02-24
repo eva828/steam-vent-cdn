@@ -385,7 +385,12 @@ impl CdnDownloader {
         let parallel_decode = self.steam_client.config().parallel_decode;
 
         let download_sem = Arc::new(tokio::sync::Semaphore::new(parallel_download));
-        let decode_sem = Arc::new(tokio::sync::Semaphore::new(parallel_decode));
+
+        // Separate semaphores for heavy (VZa/LZMA) and light (Zstd/Zip/Raw) decompression.
+        // This prevents fast Zstd tasks from starving slow VZa tasks when competing
+        // for a shared semaphore — the root cause of VZa parallelism = 1.0.
+        let heavy_decode_sem = Arc::new(tokio::sync::Semaphore::new(parallel_decode));
+        let light_decode_sem = Arc::new(tokio::sync::Semaphore::new(parallel_decode));
 
         // Fix 2: Dynamic channel buffer sizes to prevent backpressure stalls
         let download_channel_size = (parallel_download + parallel_decode).max(64);
@@ -440,53 +445,87 @@ impl CdnDownloader {
         // Fix 4: Drop the original download_tx so download_rx closes when all spawned senders finish
         drop(download_tx);
 
-        // Fix 3 & 4: Move semaphore acquisition inside spawn, and use decode_tx directly
-        //            (no clone needed at dispatcher level — clone inside loop for each task)
+        // Two-phase decode dispatcher with separate semaphores for heavy/light formats.
+        //
+        // Phase 1 (AES decrypt): lightweight (~1ms), runs in spawn_blocking without semaphore.
+        // After decryption, the chunk format is detected from magic bytes.
+        //
+        // Phase 2 (decompress + verify): routed to the appropriate semaphore:
+        //   - VZa/LZMA (heavy): heavy_decode_sem — prevents starvation by fast Zstd tasks
+        //   - Zstd/Zip/Raw (light): light_decode_sem — independent pool
+        //
+        // This ensures VZa tasks always have `parallel_decode` permits available,
+        // achieving true parallel LZMA decompression regardless of Zstd task volume.
         let _decode_dispatcher = tokio::spawn({
             let progress = progress.clone();
-            let decode_sem = decode_sem.clone();
+            let heavy_decode_sem = heavy_decode_sem.clone();
+            let light_decode_sem = light_decode_sem.clone();
             async move {
                 while let Some(result) = download_rx.recv().await {
                     match result {
                         Ok(compressed) => {
                             let decode_tx = decode_tx.clone();
                             let progress = progress.clone();
-                            let decode_sem = decode_sem.clone();
+                            let heavy_decode_sem = heavy_decode_sem.clone();
+                            let light_decode_sem = light_decode_sem.clone();
 
-                            // Fix 3: Spawn immediately without waiting for semaphore.
-                            // Semaphore is acquired inside the spawned task so the recv
-                            // loop can continue draining the download channel.
                             tokio::spawn(async move {
-                                let _permit = decode_sem.acquire().await.unwrap();
-
-                                // Fix 1: Move CPU-bound decode (AES + LZMA + checksum)
-                                // to a blocking thread pool so it doesn't starve async I/O workers.
+                                // Phase 1: AES decryption (lightweight ~1ms, run inline to
+                                // avoid flooding the blocking thread pool with 307 concurrent
+                                // tasks that would starve the CPU-heavy Phase 2 decompressions)
                                 let depot_key = compressed.depot.depot_key.clone();
                                 let compressed_data = compressed.compressed_data;
-                                let uncompressed_size = compressed.uncompressed_size;
-                                let crc = compressed.crc;
 
-                                let decoded = tokio::task::spawn_blocking(move || {
-                                    CdnClient::decode_chunk(
-                                        &compressed_data,
-                                        depot_key.as_deref(),
-                                        uncompressed_size,
-                                        crc,
-                                    )
-                                })
-                                .await;
+                                let decrypted = CdnClient::decrypt_chunk(
+                                    &compressed_data,
+                                    depot_key.as_deref(),
+                                );
 
-                                let decoded = match decoded {
-                                    Ok(inner) => inner,
-                                    Err(join_err) => {
-                                        Err(SteamVentError::InvalidData(format!(
-                                            "Decode task panicked: {}",
-                                            join_err
-                                        )))
+                                let decrypted = match decrypted {
+                                    Ok(data) => data,
+                                    Err(e) => {
+                                        let _ = decode_tx.send(Err(e)).await;
+                                        return;
                                     }
                                 };
 
-                                match decoded {
+                                // Detect format from decrypted magic bytes
+                                let format = CdnClient::detect_chunk_format(&decrypted);
+
+                                // Phase 2: Acquire the appropriate semaphore, then decompress
+                                let _permit = if format.is_heavy() {
+                                    heavy_decode_sem.acquire().await.unwrap()
+                                } else {
+                                    light_decode_sem.acquire().await.unwrap()
+                                };
+
+                                let uncompressed_size = compressed.uncompressed_size;
+                                let crc = compressed.crc;
+
+                                // Use std::thread instead of spawn_blocking to bypass
+                                // tokio's blocking thread pool entirely. This avoids
+                                // thread scheduling contention and ensures VZa LZMA
+                                // decompression tasks get dedicated OS threads immediately.
+                                let (tx, rx) = tokio::sync::oneshot::channel();
+                                std::thread::spawn(move || {
+                                    let result = CdnClient::decompress_and_verify(
+                                        &decrypted,
+                                        uncompressed_size,
+                                        crc,
+                                    );
+                                    let _ = tx.send(result);
+                                });
+
+                                let decompressed = match rx.await {
+                                    Ok(inner) => inner,
+                                    Err(_) => {
+                                        Err(SteamVentError::InvalidData(
+                                            "Decompress thread dropped without sending result".to_string(),
+                                        ))
+                                    }
+                                };
+
+                                match decompressed {
                                     Ok(data) => {
                                         let len = data.len() as u64;
                                         progress.on_decode_progress(len);

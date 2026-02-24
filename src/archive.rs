@@ -183,6 +183,29 @@ impl<'a> ArchiveExtractor for RawArchiveExtractor<'a> {
     }
 }
 
+/// Compression format of a Steam chunk, determined after AES decryption.
+/// Used to route chunks to appropriate semaphores for parallel decode control.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChunkFormat {
+    /// VZa (LZMA) — CPU-heavy, ~170ms per 1MB chunk
+    VZa,
+    /// Raw LZMA — CPU-heavy
+    Lzma,
+    /// Zstd — lightweight, ~30ms per 1MB chunk
+    Zstd,
+    /// Zip — lightweight
+    Zip,
+    /// Raw / uncompressed — near-instant
+    Raw,
+}
+
+impl ChunkFormat {
+    /// Returns true if this format requires heavy CPU work (LZMA-based).
+    pub fn is_heavy(&self) -> bool {
+        matches!(self, ChunkFormat::VZa | ChunkFormat::Lzma)
+    }
+}
+
 pub struct SteamChunk<'a> {
     data: &'a [u8],
 }
@@ -220,6 +243,58 @@ impl<'a> SteamChunk<'a> {
                 Err(SteamVentError::Encryption(EncryptionError::Unpadding))
             }
         }
+    }
+
+    /// Perform AES decryption only (phase 1 of decode pipeline).
+    /// Returns owned decrypted data, or a copy of the original data if no key is provided.
+    pub fn decrypt_only(data: &[u8], depot_key: Option<&[u8]>) -> Result<Vec<u8>> {
+        let chunk = SteamChunk::new(data);
+        if let Some(key) = depot_key {
+            match chunk.decrypt(key) {
+                Ok(decrypted) => Ok(decrypted),
+                Err(e) => {
+                    let magic_bytes = &data[..data.len().min(4)];
+                    tracing::error!(
+                        "Chunk decryption failed: {} (input size: {} bytes, magic bytes: {:02X?})",
+                        e,
+                        data.len(),
+                        magic_bytes
+                    );
+                    Err(SteamVentError::Encryption(EncryptionError::Decrypt(
+                        format!(
+                            "Chunk decryption failed: {} (input size: {} bytes, magic bytes: {:02X?})",
+                            e,
+                            data.len(),
+                            magic_bytes
+                        ),
+                    )))
+                }
+            }
+        } else {
+            Ok(data.to_vec())
+        }
+    }
+
+    /// Detect compression format from decrypted data by inspecting magic bytes.
+    pub(crate) fn detect_format(data: &[u8]) -> ChunkFormat {
+        if data.starts_with(VZaArchiveExtractor::MAGIC) {
+            ChunkFormat::VZa
+        } else if data.starts_with(ZstdArchiveExtractor::MAGIC) {
+            ChunkFormat::Zstd
+        } else if data.starts_with(ZipArchiveExtractor::MAGIC) {
+            ChunkFormat::Zip
+        } else if data.starts_with(LzmaArchiveExtractor::MAGIC) {
+            ChunkFormat::Lzma
+        } else {
+            ChunkFormat::Raw
+        }
+    }
+
+    /// Decompress already-decrypted data (phase 2 of decode pipeline).
+    pub fn decompress(data: &[u8]) -> Result<Vec<u8>> {
+        let chunk = SteamChunk::new(data);
+        let extractor = chunk.get_extractor()?;
+        extractor.extract()
     }
 
     fn get_extractor(&self) -> Result<Box<dyn ArchiveExtractor + 'a>> {

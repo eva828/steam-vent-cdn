@@ -239,14 +239,30 @@ impl CdnClient {
         }
     }
 
-    pub(crate) fn decode_chunk(
+    /// Phase 1: AES decryption only (lightweight, ~1ms).
+    /// Returns decrypted data suitable for format detection and decompression.
+    pub(crate) fn decrypt_chunk(
         compressed_data: &[u8],
         depot_key: Option<&[u8]>,
+    ) -> Result<Vec<u8>> {
+        crate::archive::SteamChunk::decrypt_only(compressed_data, depot_key)
+    }
+
+    /// Detect compression format from decrypted chunk data.
+    pub(crate) fn detect_chunk_format(
+        decrypted_data: &[u8],
+    ) -> crate::archive::ChunkFormat {
+        crate::archive::SteamChunk::detect_format(decrypted_data)
+    }
+
+    /// Phase 2: Decompress already-decrypted data and verify integrity (size + CRC).
+    /// This is the CPU-heavy step for VZa/LZMA formats (~170ms).
+    pub(crate) fn decompress_and_verify(
+        decrypted_data: &[u8],
         expected_uncompressed_size: u32,
         expected_crc: u32,
     ) -> Result<Vec<u8>> {
-        let decompressed =
-            crate::archive::SteamChunk::new(compressed_data).decode(depot_key)?;
+        let decompressed = crate::archive::SteamChunk::decompress(decrypted_data)?;
 
         // Verify uncompressed size matches manifest's cb_original
         let actual_size = decompressed.len() as u32;
