@@ -70,28 +70,28 @@ pub(crate) struct DownloadManifest {
 }
 
 impl DownloadManifest {
-    pub(crate) fn to_download_items(&self) -> Result<Vec<DownloadItem>> {
+    pub(crate) fn into_download_items(self) -> Result<Vec<DownloadItem>> {
         let mut items = Vec::new();
 
-        for mapping in &self.manifest.mappings {
-            let filename = mapping.filename.clone().unwrap_or_default();
+        for mut mapping in self.manifest.mappings {
+            let filename = mapping.filename.take().unwrap_or_default();
             let chunks: Vec<ChunkInfo> = mapping
                 .chunks
-                .iter()
-                .map(|c| -> Result<ChunkInfo> {
-                    let sha = c.sha.clone().ok_or_else(|| {
+                .into_iter()
+                .map(|mut c| -> Result<ChunkInfo> {
+                    let sha = c.sha.take().ok_or_else(|| {
                         SteamVentError::InvalidData("Chunk SHA is missing".to_string())
                     })?;
 
-                    let crc = c.crc.ok_or_else(|| {
+                    let crc = c.crc.take().ok_or_else(|| {
                         SteamVentError::InvalidData("Chunk CRC is missing".to_string())
                     })?;
 
-                    let uncompressed_size = c.cb_original.ok_or_else(|| {
+                    let uncompressed_size = c.cb_original.take().ok_or_else(|| {
                         SteamVentError::InvalidData("Chunk cb_original is missing".to_string())
                     })?;
 
-                    let compressed_size = c.cb_compressed.ok_or_else(|| {
+                    let compressed_size = c.cb_compressed.take().ok_or_else(|| {
                         SteamVentError::InvalidData("Chunk cb_compressed is missing".to_string())
                     })?;
 
@@ -107,8 +107,8 @@ impl DownloadManifest {
             items.push(DownloadItem {
                 filename,
                 chunks,
-                flags: mapping.flags,
-                size: mapping.size,
+                flags: mapping.flags.take(),
+                size: mapping.size.take(),
                 depot: Arc::clone(&self.depot),
             });
         }
@@ -356,7 +356,7 @@ impl CdnDownloader {
         let app_id = details.consumer_appid.unwrap_or(config_app_id);
 
         let manifest_data = self.fetch_manifest_by_id(manifest_id, app_id).await?;
-        manifest_data.to_download_items()
+        manifest_data.into_download_items()
     }
 
     pub async fn download_to_directory(
