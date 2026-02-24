@@ -403,7 +403,7 @@ impl CdnDownloader {
 
         let cdn_client = self.cdn_client.clone();
 
-        for task in tasks {
+        for (task_index, task) in tasks.into_iter().enumerate() {
             let download_sem = download_sem.clone();
             let download_tx = download_tx.clone();
             let cdn_client = cdn_client.clone();
@@ -412,11 +412,16 @@ impl CdnDownloader {
                 let progress = progress.clone();
                 async move {
                     let _permit = download_sem.acquire().await.unwrap();
+                    // Distribute chunks across CDN servers via round-robin.
+                    // Each chunk starts from a different server to spread load
+                    // and avoid concentrating all traffic on a single (potentially slow) node.
+                    let start_server = task_index % task.depot.server_hosts.len().max(1);
                     let compressed_data = cdn_client
                         .download_chunk(
                             &task.depot.server_hosts,
                             task.depot.depot_id,
                             &task.chunk_id,
+                            start_server,
                         )
                         .await;
 
