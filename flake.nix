@@ -34,14 +34,10 @@
         };
 
         devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [
+          buildInputs = [
             rustToolchain
-            fenix.packages.${system}.rust-analyzer
-            fenix.packages.${system}.rustfmt
-            fenix.packages.${system}.clippy
           ];
           shellHook = ''
-            echo "SteamVentCdn開発環境"
             rustc --version
           '';
         };
