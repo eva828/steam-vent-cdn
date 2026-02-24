@@ -58,6 +58,15 @@ pub enum CompressionError {
 }
 
 #[derive(Error, Debug)]
+pub enum IntegrityError {
+    #[error("Chunk size mismatch: expected {expected} bytes, got {actual} bytes")]
+    SizeMismatch { expected: u32, actual: u32 },
+
+    #[error("Chunk checksum mismatch: expected Adler32 {expected:#010X}, got {actual:#010X}")]
+    ChecksumMismatch { expected: u32, actual: u32 },
+}
+
+#[derive(Error, Debug)]
 pub enum EncryptionError {
     #[error("Key initialization failed")]
     KeyInit(#[source] aes::cipher::InvalidLength),
@@ -94,6 +103,9 @@ pub enum SteamVentError {
 
     #[error("Encryption error")]
     Encryption(#[from] EncryptionError),
+
+    #[error("Integrity error")]
+    Integrity(#[from] IntegrityError),
 
     #[error("Network error")]
     Network(#[from] reqwest::Error),

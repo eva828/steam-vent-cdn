@@ -52,11 +52,6 @@ impl<'a> ZstdArchiveExtractor<'a> {
 
 impl<'a> ArchiveExtractor for ZstdArchiveExtractor<'a> {
     fn extract(&self) -> Result<Vec<u8>> {
-        if self.data.len() <= 8 {
-            return Err(SteamVentError::Compression(CompressionError::InvalidData(
-                "Zstd chunk too small".to_string(),
-            )));
-        }
         let zstd_payload = &self.data[8..];
         let mut decompressed = Vec::new();
         let mut decoder = zstd::stream::Decoder::new(Cursor::new(zstd_payload))
@@ -86,16 +81,6 @@ impl<'a> VZaArchiveExtractor<'a> {
 
 impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
     fn extract(&self) -> Result<Vec<u8>> {
-        // Minimum VZa structure: 7 bytes header + 5 props + 0 compressed + 10 footer = 22
-        if self.data.len() < 22 {
-            return Err(SteamVentError::Compression(CompressionError::InvalidData(
-                format!(
-                    "VZa data too small ({} bytes, minimum required: 22 bytes)",
-                    self.data.len()
-                ),
-            )));
-        }
-
         if !self.data.starts_with(Self::MAGIC) {
             let magic_bytes = &self.data[..self.data.len().min(4)];
             return Err(SteamVentError::Compression(CompressionError::InvalidData(
@@ -104,15 +89,6 @@ impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
         }
 
         // Reserved bytes at offset 3-6 should be zero; we skip validation.
-
-        // Compressed data: from offset 12 to len - 10
-        let compressed_start = 12;
-        let compressed_end = self.data.len() - 10;
-        if compressed_end <= compressed_start {
-            return Err(SteamVentError::Compression(CompressionError::InvalidData(
-                "VZa compressed region empty".to_string(),
-            )));
-        }
 
         // Verify footer ends with 'zv' (last 2 bytes)
         let footer_zv = &self.data[self.data.len() - 2..];
@@ -127,26 +103,8 @@ impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
         let uncompressed_size =
             u32::from_le_bytes(uncompressed_size_bytes.try_into().unwrap_or([0; 4])) as usize;
 
-        const MAX_VZA_SIZE: usize = 1_000_000_000;
-
-        if uncompressed_size == 0 {
-            return Err(SteamVentError::Compression(CompressionError::InvalidData(
-                "VZa uncompressed size is zero".to_string(),
-            )));
-        }
-
-        if uncompressed_size > MAX_VZA_SIZE {
-            return Err(SteamVentError::Compression(CompressionError::InvalidData(
-                format!(
-                    "VZa uncompressed size {} exceeds maximum allowed size of {} bytes ({} MiB)",
-                    uncompressed_size,
-                    MAX_VZA_SIZE,
-                    MAX_VZA_SIZE / 1024 / 1024
-                ),
-            )));
-        }
-
-        let compressed_size = compressed_end - compressed_start;
+        // Compressed data: from offset 12 to len - 10
+        let compressed_end = self.data.len() - 10;
 
         let mut decompressed = Vec::with_capacity(uncompressed_size);
         let mut options: lzma_rs::decompress::Options = Default::default();
@@ -166,22 +124,12 @@ impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
             return Err(SteamVentError::Compression(CompressionError::Lzma(e)));
         }
 
-        if decompressed.len() == uncompressed_size {
-            tracing::debug!(
-                "VZa extracted successfully: {} bytes input -> {} bytes output",
-                compressed_size,
-                decompressed.len()
-            );
-            Ok(decompressed)
-        } else {
-            Err(SteamVentError::Compression(CompressionError::InvalidData(
-                format!(
-                    "VZa decode incomplete: written={}, expected={}",
-                    decompressed.len(),
-                    uncompressed_size
-                ),
-            )))
-        }
+        tracing::debug!(
+            "VZa extracted successfully: {} bytes input -> {} bytes output",
+            self.data.len(),
+            decompressed.len()
+        );
+        Ok(decompressed)
     }
 }
 

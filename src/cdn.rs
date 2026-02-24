@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::connection::ConnectionExt;
-use crate::error::{CdnConnectionError, Result, SteamVentError};
+use crate::error::{CdnConnectionError, IntegrityError, Result, SteamVentError};
 use reqwest::Client as HttpClient;
 use steam_vent_proto::steammessages_contentsystem_steamclient::CContentServerDirectory_GetServersForSteamPipe_Request;
 
@@ -242,7 +242,33 @@ impl CdnClient {
     pub(crate) fn decode_chunk(
         compressed_data: &[u8],
         depot_key: Option<&[u8]>,
+        expected_uncompressed_size: u32,
+        expected_crc: u32,
     ) -> Result<Vec<u8>> {
-        crate::archive::SteamChunk::new(compressed_data).decode(depot_key)
+        let decompressed =
+            crate::archive::SteamChunk::new(compressed_data).decode(depot_key)?;
+
+        // Verify uncompressed size matches manifest's cb_original
+        let actual_size = decompressed.len() as u32;
+        if actual_size != expected_uncompressed_size {
+            return Err(SteamVentError::Integrity(IntegrityError::SizeMismatch {
+                expected: expected_uncompressed_size,
+                actual: actual_size,
+            }));
+        }
+
+        // Verify Adler32 checksum matches manifest's crc
+        // Steam uses Adler32 with initial seed 0 (non-standard; RFC 1950 uses 1)
+        let mut hasher = adler::Adler32::from_checksum(0);
+        hasher.write_slice(&decompressed);
+        let actual_crc = hasher.checksum();
+        if actual_crc != expected_crc {
+            return Err(SteamVentError::Integrity(IntegrityError::ChecksumMismatch {
+                expected: expected_crc,
+                actual: actual_crc,
+            }));
+        }
+
+        Ok(decompressed)
     }
 }

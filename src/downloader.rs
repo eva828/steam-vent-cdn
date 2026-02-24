@@ -30,6 +30,8 @@ pub struct ChunkDownloadTask {
     pub file_index: usize,
     pub chunk_index: usize,
     pub compressed_size: u32,
+    pub uncompressed_size: u32,
+    pub crc: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -38,6 +40,8 @@ pub struct CompressedChunk {
     pub file_index: usize,
     pub chunk_index: usize,
     pub compressed_data: Vec<u8>,
+    pub uncompressed_size: u32,
+    pub crc: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -79,6 +83,10 @@ impl DownloadManifest {
                         SteamVentError::InvalidData("Chunk SHA is missing".to_string())
                     })?;
 
+                    let crc = c.crc.ok_or_else(|| {
+                        SteamVentError::InvalidData("Chunk CRC is missing".to_string())
+                    })?;
+
                     let uncompressed_size = c.cb_original.ok_or_else(|| {
                         SteamVentError::InvalidData("Chunk cb_original is missing".to_string())
                     })?;
@@ -89,6 +97,7 @@ impl DownloadManifest {
 
                     Ok(ChunkInfo {
                         sha,
+                        crc,
                         uncompressed_size,
                         compressed_size,
                     })
@@ -113,6 +122,7 @@ impl DownloadManifest {
 #[derive(Debug, Clone)]
 pub struct ChunkInfo {
     pub sha: Vec<u8>,
+    pub crc: u32,
     pub uncompressed_size: u32,
     pub compressed_size: u32,
 }
@@ -372,6 +382,8 @@ impl CdnDownloader {
                     file_index,
                     chunk_index,
                     compressed_size: chunk.compressed_size,
+                    uncompressed_size: chunk.uncompressed_size,
+                    crc: chunk.crc,
                 });
             }
         }
@@ -413,6 +425,8 @@ impl CdnDownloader {
                                     file_index: task.file_index,
                                     chunk_index: task.chunk_index,
                                     compressed_data: data,
+                                    uncompressed_size: task.uncompressed_size,
+                                    crc: task.crc,
                                 }))
                                 .await;
                         }
@@ -443,7 +457,12 @@ impl CdnDownloader {
                             tokio::spawn(async move {
                                 let depot_key = compressed.depot.depot_key.as_deref();
                                 let decoded: Result<Vec<u8>> =
-                                    CdnClient::decode_chunk(&compressed.compressed_data, depot_key);
+                                    CdnClient::decode_chunk(
+                                        &compressed.compressed_data,
+                                        depot_key,
+                                        compressed.uncompressed_size,
+                                        compressed.crc,
+                                    );
 
                                 match decoded {
                                     Ok(data) => {

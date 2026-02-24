@@ -3,6 +3,12 @@
 version = 4
 
 [[package]]
+name = "adler"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f26201604c87b1e01bd3d98f8d5d9a8fcbb815e8cedb41ffccbeb4bf593a35fe"
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2358,7 +2364,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 [[package]]
 name = "steam-vent"
 version = "0.4.2"
-source = "git+https://codeberg.org/eva828/steam-vent.git?branch=main#3763e05837221787b5b93fc66bb7f36e338206c9"
+source = "git+https://codeberg.org/eva828/steam-vent.git?branch=main#8adc75a35f411adc78917adf1fdd54c7a8e5da82"
 dependencies = [
  "another-steam-totp",
  "async-stream",
@@ -2398,6 +2404,7 @@ dependencies = [
 name = "steam-vent-cdn"
 version = "0.1.0"
 dependencies = [
+ "adler",
  "aes",
  "base64",
  "block-modes",
@@ -2406,7 +2413,6 @@ dependencies = [
  "cbc",
  "chrono",
  "clap",
- "crc",
  "ecb",
  "env_logger",
  "futures",
@@ -2419,7 +2425,6 @@ dependencies = [
  "rpassword",
  "serde",
  "serde_json",
- "sha1",
  "steam-vent",
  "steam-vent-proto",
  "thiserror 1.0.69",
@@ -2436,7 +2441,7 @@ dependencies = [
 [[package]]
 name = "steam-vent-crypto"
 version = "0.2.1"
-source = "git+https://codeberg.org/eva828/steam-vent.git?branch=main#3763e05837221787b5b93fc66bb7f36e338206c9"
+source = "git+https://codeberg.org/eva828/steam-vent.git?branch=main#8adc75a35f411adc78917adf1fdd54c7a8e5da82"
 dependencies = [
  "aes",
  "bytes 1.11.1",
