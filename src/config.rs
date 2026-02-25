@@ -32,7 +32,6 @@ pub struct Config {
     pub retry_policy: RetryPolicy,
     pub app_id: u32,
     pub parallel_download: usize,
-    pub parallel_decode: usize,
 }
 
 impl Default for Config {
@@ -43,7 +42,6 @@ impl Default for Config {
             retry_policy: RetryPolicy::default(),
             app_id: 1281930,
             parallel_download: 16,
-            parallel_decode: 8,
         }
     }
 }
@@ -77,11 +75,6 @@ impl ConfigBuilder {
 
     pub fn parallel_download(mut self, parallel_download: usize) -> Self {
         self.config.parallel_download = parallel_download;
-        self
-    }
-
-    pub fn parallel_decode(mut self, parallel_decode: usize) -> Self {
-        self.config.parallel_decode = parallel_decode;
         self
     }
 

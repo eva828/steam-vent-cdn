@@ -48,9 +48,6 @@ pub struct Args {
     #[arg(long, default_value_t = 16, help = "Parallel download connections")]
     pub parallel_download: usize,
 
-    #[arg(long, default_value_t = 8, help = "Parallel decode workers")]
-    pub parallel_decode: usize,
-
     #[arg(short, long, help = "Enable verbose output")]
     pub verbose: bool,
 }

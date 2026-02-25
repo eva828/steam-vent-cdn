@@ -90,17 +90,11 @@ pub fn resolve_credentials(
     }
 }
 
-pub fn create_config(
-    credentials: Credentials,
-    app_id: u32,
-    parallel_download: usize,
-    parallel_decode: usize,
-) -> Config {
+pub fn create_config(credentials: Credentials, app_id: u32, parallel_download: usize) -> Config {
     Config::builder()
         .credentials(credentials)
         .app_id(app_id)
         .parallel_download(parallel_download)
-        .parallel_decode(parallel_decode)
         .timeout(std::time::Duration::from_secs(30))
         .retry_policy(RetryPolicy {
             max_retries: 3,

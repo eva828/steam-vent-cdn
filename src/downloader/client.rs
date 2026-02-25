@@ -263,10 +263,12 @@ impl CdnDownloader {
         }
 
         let parallel_download = self.steam_client.config().parallel_download;
-        let parallel_decode = self.steam_client.config().parallel_decode;
 
-        let download_channel_size = (parallel_download + parallel_decode).max(64);
-        let decode_channel_size = (parallel_decode * 2).max(32);
+        let download_channel_size = (parallel_download * 2).max(64);
+        let logical_cores = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(8);
+        let decode_channel_size = (logical_cores * 2).max(32);
 
         let (download_tx, download_rx) =
             tokio::sync::mpsc::channel::<Result<CompressedChunk>>(download_channel_size);
