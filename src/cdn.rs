@@ -82,15 +82,22 @@ impl CdnClient {
             let a_is_cache = a.server_type == "SteamCache";
             let b_is_cache = b.server_type == "SteamCache";
             // SteamCache first, then CDN
-            b_is_cache
-                .cmp(&a_is_cache)
-                .then_with(|| a.weighted_load.partial_cmp(&b.weighted_load).unwrap_or(std::cmp::Ordering::Equal))
+            b_is_cache.cmp(&a_is_cache).then_with(|| {
+                a.weighted_load
+                    .partial_cmp(&b.weighted_load)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
         });
 
         for (i, s) in servers.iter().enumerate() {
             tracing::info!(
                 "CDN server [{}]: {} (type={}, load={}, weighted_load={:.1}, priority={})",
-                i, s.vhost, s.server_type, s.load, s.weighted_load, s.priority_class
+                i,
+                s.vhost,
+                s.server_type,
+                s.load,
+                s.weighted_load,
+                s.priority_class
             );
         }
 
@@ -305,13 +312,6 @@ impl CdnClient {
         crate::archive::SteamChunk::decrypt_only(compressed_data, depot_key)
     }
 
-    /// Detect compression format from decrypted chunk data.
-    pub(crate) fn detect_chunk_format(
-        decrypted_data: &[u8],
-    ) -> crate::archive::ChunkFormat {
-        crate::archive::SteamChunk::detect_format(decrypted_data)
-    }
-
     /// Phase 2: Decompress already-decrypted data and verify integrity (size + CRC).
     /// This is the CPU-heavy step for VZa/LZMA formats (~170ms).
     pub(crate) fn decompress_and_verify(
@@ -336,10 +336,12 @@ impl CdnClient {
         hasher.write_slice(&decompressed);
         let actual_crc = hasher.checksum();
         if actual_crc != expected_crc {
-            return Err(SteamVentError::Integrity(IntegrityError::ChecksumMismatch {
-                expected: expected_crc,
-                actual: actual_crc,
-            }));
+            return Err(SteamVentError::Integrity(
+                IntegrityError::ChecksumMismatch {
+                    expected: expected_crc,
+                    actual: actual_crc,
+                },
+            ));
         }
 
         Ok(decompressed)

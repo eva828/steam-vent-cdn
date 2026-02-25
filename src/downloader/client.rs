@@ -185,15 +185,15 @@ impl CdnDownloader {
         let mut need_key_for_filenames = false;
         let mut depot_id_for_key = app_id;
 
-        if let Some(ref m) = metadata {
-            if m.filenames_encrypted.unwrap_or(false) {
-                need_key_for_filenames = true;
-                depot_id_for_key = m.depot_id.unwrap_or(app_id);
-                tracing::debug!(
-                    "Manifest filenames are encrypted (depot_id: {}).",
-                    depot_id_for_key
-                );
-            }
+        if let Some(ref m) = metadata
+            && m.filenames_encrypted.unwrap_or(false)
+        {
+            need_key_for_filenames = true;
+            depot_id_for_key = m.depot_id.unwrap_or(app_id);
+            tracing::debug!(
+                "Manifest filenames are encrypted (depot_id: {}).",
+                depot_id_for_key
+            );
         }
 
         match self.fetch_depot_key(app_id, depot_id_for_key).await {

@@ -1,6 +1,6 @@
 use crate::error::{CompressionError, EncryptionError, Result, SteamVentError};
-use aes::cipher::{BlockDecrypt, KeyInit};
 use aes::Aes256;
+use aes::cipher::{BlockDecrypt, KeyInit};
 use cbc::cipher::{BlockDecryptMut, KeyIvInit};
 use std::io::{Cursor, Read};
 
@@ -183,29 +183,6 @@ impl<'a> ArchiveExtractor for RawArchiveExtractor<'a> {
     }
 }
 
-/// Compression format of a Steam chunk, determined after AES decryption.
-/// Used to route chunks to appropriate semaphores for parallel decode control.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ChunkFormat {
-    /// VZa (LZMA) — CPU-heavy, ~170ms per 1MB chunk
-    VZa,
-    /// Raw LZMA — CPU-heavy
-    Lzma,
-    /// Zstd — lightweight, ~30ms per 1MB chunk
-    Zstd,
-    /// Zip — lightweight
-    Zip,
-    /// Raw / uncompressed — near-instant
-    Raw,
-}
-
-impl ChunkFormat {
-    /// Returns true if this format requires heavy CPU work (LZMA-based).
-    pub fn is_heavy(&self) -> bool {
-        matches!(self, ChunkFormat::VZa | ChunkFormat::Lzma)
-    }
-}
-
 pub struct SteamChunk<'a> {
     data: &'a [u8],
 }
@@ -272,21 +249,6 @@ impl<'a> SteamChunk<'a> {
             }
         } else {
             Ok(data.to_vec())
-        }
-    }
-
-    /// Detect compression format from decrypted data by inspecting magic bytes.
-    pub(crate) fn detect_format(data: &[u8]) -> ChunkFormat {
-        if data.starts_with(VZaArchiveExtractor::MAGIC) {
-            ChunkFormat::VZa
-        } else if data.starts_with(ZstdArchiveExtractor::MAGIC) {
-            ChunkFormat::Zstd
-        } else if data.starts_with(ZipArchiveExtractor::MAGIC) {
-            ChunkFormat::Zip
-        } else if data.starts_with(LzmaArchiveExtractor::MAGIC) {
-            ChunkFormat::Lzma
-        } else {
-            ChunkFormat::Raw
         }
     }
 
