@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum SteamConnectionError {
+pub enum SteamSessionError {
     #[error("Steam server discovery failed: {0}")]
     ServerDiscovery(#[from] steam_vent::ServerDiscoveryError),
 
@@ -15,14 +15,14 @@ pub enum SteamConnectionError {
     ApiCallFailed(#[source] Box<steam_vent::NetworkError>),
 }
 
-impl From<steam_vent::NetworkError> for SteamConnectionError {
+impl From<steam_vent::NetworkError> for SteamSessionError {
     fn from(err: steam_vent::NetworkError) -> Self {
         Self::ApiCallFailed(Box::new(err))
     }
 }
 
 #[derive(Error, Debug)]
-pub enum CdnConnectionError {
+pub enum CdnError {
     #[error("No CDN servers available")]
     NoServers,
 
@@ -60,16 +60,22 @@ pub enum CompressionError {
     Zip(#[from] zip::result::ZipError),
 
     #[error("Invalid compression data: {0}")]
-    InvalidData(String),
+    InvalidLzmaHeader(&'static str),
 }
 
 #[derive(Error, Debug)]
-pub enum IntegrityError {
+pub enum ChunkError {
     #[error("Chunk size mismatch: expected {expected} bytes, got {actual} bytes")]
     SizeMismatch { expected: u32, actual: u32 },
 
     #[error("Chunk checksum mismatch: expected Adler32 {expected:#010X}, got {actual:#010X}")]
     ChecksumMismatch { expected: u32, actual: u32 },
+
+    #[error("Unexpected chunk state: expected {expected}, got {actual}")]
+    UnexpectedState {
+        expected: &'static str,
+        actual: &'static str,
+    },
 }
 
 #[derive(Error, Debug)]
@@ -106,18 +112,33 @@ pub enum ManifestError {
 }
 
 #[derive(Error, Debug)]
-pub enum ChunkStateError {
-    #[error("Invalid chunk state: expected {expected}, got {actual}")]
-    InvalidState { expected: &'static str, actual: &'static str },
+pub enum WorkshopError {
+    #[error("Item details for {0} is missing or empty")]
+    ItemDetailsMissing(u64),
+
+    #[error("Item is not a Steam Workshop item")]
+    NotAWorkshopItem,
+
+    #[error("No manifest ID (hcontent_file) found")]
+    MissingManifestId,
+
+    #[error("consumer_appid is missing in item details")]
+    MissingConsumerAppId,
+
+    #[error("No versions found")]
+    NoVersionsFound,
+
+    #[error("Version {0} not found")]
+    VersionNotFound(String),
 }
 
 #[derive(Error, Debug)]
 pub enum SteamVentError {
-    #[error("Steam connection error")]
-    Connection(#[from] SteamConnectionError),
+    #[error("Steam session error")]
+    SteamSession(#[from] SteamSessionError),
 
-    #[error("CDN connection error")]
-    CdnConnection(#[from] CdnConnectionError),
+    #[error("CDN error")]
+    Cdn(#[from] CdnError),
 
     #[error("Compression error")]
     Compression(#[from] CompressionError),
@@ -125,11 +146,8 @@ pub enum SteamVentError {
     #[error("Encryption error")]
     Encryption(#[from] EncryptionError),
 
-    #[error("Integrity error")]
-    Integrity(#[from] IntegrityError),
-
-    #[error("Chunk state error")]
-    ChunkState(#[from] ChunkStateError),
+    #[error("Chunk error")]
+    Chunk(#[from] ChunkError),
 
     #[error("Network error")]
     Network(#[from] reqwest::Error),
@@ -137,8 +155,8 @@ pub enum SteamVentError {
     #[error("Manifest error")]
     Manifest(#[from] ManifestError),
 
-    #[error("Invalid data: {0}")]
-    InvalidData(String),
+    #[error("Workshop error")]
+    Workshop(#[from] WorkshopError),
 
     #[error("IO error")]
     Io(#[from] std::io::Error),

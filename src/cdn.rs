@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::connection::ConnectionExt;
-use crate::error::{CdnConnectionError, Result, SteamVentError};
+use crate::error::{CdnError, Result, SteamVentError};
 use reqwest::Client as HttpClient;
 use steam_vent_proto::steammessages_contentsystem_steamclient::CContentServerDirectory_GetServersForSteamPipe_Request;
 
@@ -28,9 +28,10 @@ impl CdnClient {
             .http2_prior_knowledge()
             .build()
             .map_err(|e| {
-                SteamVentError::CdnConnection(CdnConnectionError::InvalidConfiguration(
-                    format!("Failed to build HTTP client with custom timeout: {}", e),
-                ))
+                SteamVentError::Cdn(CdnError::InvalidConfiguration(format!(
+                    "Failed to build HTTP client with custom timeout: {}",
+                    e
+                )))
             })?;
         Ok(Self {
             http_client,
@@ -61,7 +62,7 @@ impl CdnClient {
             .await?;
 
         if srv_resp.servers.is_empty() {
-            return Err(SteamVentError::CdnConnection(CdnConnectionError::NoServers));
+            return Err(SteamVentError::Cdn(CdnError::NoServers));
         }
 
         let mut servers: Vec<CdnServer> = srv_resp
@@ -88,18 +89,20 @@ impl CdnClient {
             let b_is_cache = b.server_type == "SteamCache";
             // SteamCache first, then CDN
             b_is_cache.cmp(&a_is_cache).then_with(|| {
-                a.weighted_load.partial_cmp(&b.weighted_load).unwrap_or_else(|| {
-                    if a.weighted_load.is_nan() || b.weighted_load.is_nan() {
-                        tracing::warn!(
-                            "CDN server has invalid weighted_load (NaN): {}={}, {}={}",
-                            a.vhost,
-                            a.weighted_load,
-                            b.vhost,
-                            b.weighted_load
-                        );
-                    }
-                    std::cmp::Ordering::Equal
-                })
+                a.weighted_load
+                    .partial_cmp(&b.weighted_load)
+                    .unwrap_or_else(|| {
+                        if a.weighted_load.is_nan() || b.weighted_load.is_nan() {
+                            tracing::warn!(
+                                "CDN server has invalid weighted_load (NaN): {}={}, {}={}",
+                                a.vhost,
+                                a.weighted_load,
+                                b.vhost,
+                                b.weighted_load
+                            );
+                        }
+                        std::cmp::Ordering::Equal
+                    })
             })
         });
 
@@ -171,9 +174,7 @@ impl CdnClient {
                             .collect::<Vec<_>>(),
                         body_preview
                     );
-                    return Err(SteamVentError::CdnConnection(
-                        CdnConnectionError::HttpError { status },
-                    ));
+                    return Err(SteamVentError::Cdn(CdnError::HttpError { status }));
                 }
                 resp.bytes().await.map_err(SteamVentError::from)
             }
@@ -193,9 +194,7 @@ impl CdnClient {
                 }
             }
         }
-        Err(SteamVentError::CdnConnection(
-            CdnConnectionError::AllServersFailed,
-        ))
+        Err(SteamVentError::Cdn(CdnError::AllServersFailed))
     }
 
     pub async fn download_chunk(
@@ -206,7 +205,7 @@ impl CdnClient {
         start_server_index: usize,
     ) -> Result<Vec<u8>> {
         if server_hosts.is_empty() {
-            return Err(SteamVentError::CdnConnection(CdnConnectionError::NoServers));
+            return Err(SteamVentError::Cdn(CdnError::NoServers));
         }
 
         let mut retry_count = 0;
@@ -310,11 +309,8 @@ impl CdnClient {
                     tokio::time::sleep(self.config.retry_policy.retry_delay).await;
                 }
             } else {
-                return Err(SteamVentError::CdnConnection(
-                    CdnConnectionError::AllServersFailed,
-                ));
+                return Err(SteamVentError::Cdn(CdnError::AllServersFailed));
             }
         }
     }
-
 }

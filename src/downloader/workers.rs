@@ -46,8 +46,8 @@ impl DownloadWorker {
                     Err(_) => {
                         // Semaphore closed - send error to channel
                         let _ = download_tx
-                            .send(Err(SteamVentError::CdnConnection(
-                                crate::error::CdnConnectionError::SemaphoreClosed,
+                            .send(Err(SteamVentError::Cdn(
+                                crate::error::CdnError::SemaphoreClosed,
                             )))
                             .await;
                         return;

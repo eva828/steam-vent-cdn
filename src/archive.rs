@@ -1,6 +1,6 @@
 use crate::error::{CompressionError, EncryptionError, Result, SteamVentError};
-use aes::cipher::{BlockDecrypt, KeyInit};
 use aes::Aes256;
+use aes::cipher::{BlockDecrypt, KeyInit};
 use cbc::cipher::{BlockDecryptMut, KeyIvInit};
 use std::io::{Cursor, Read};
 
@@ -82,10 +82,9 @@ impl<'a> VZaArchiveExtractor<'a> {
 impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
     fn extract(&self) -> Result<Vec<u8>> {
         if !self.data.starts_with(Self::MAGIC) {
-            let magic_bytes = &self.data[..self.data.len().min(4)];
-            return Err(SteamVentError::Compression(CompressionError::InvalidData(
-                format!("Not VZa format (magic bytes: {:02X?})", magic_bytes),
-            )));
+            return Err(SteamVentError::Compression(
+                CompressionError::InvalidLzmaHeader("Not VZa format"),
+            ));
         }
 
         // Reserved bytes at offset 3-6 should be zero; we skip validation.
@@ -93,18 +92,17 @@ impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
         // Verify footer ends with 'zv' (last 2 bytes)
         let footer_zv = &self.data[self.data.len() - 2..];
         if footer_zv != b"zv" {
-            return Err(SteamVentError::Compression(CompressionError::InvalidData(
-                "VZa footer does not end with 'zv'".to_string(),
-            )));
+            return Err(SteamVentError::Compression(
+                CompressionError::InvalidLzmaHeader("VZa footer does not end with 'zv'"),
+            ));
         }
 
         // Uncompressed size from footer: bytes [len-6..len-2] (little endian)
         let uncompressed_size_bytes = &self.data[self.data.len() - 6..self.data.len() - 2];
         let uncompressed_size =
             u32::from_le_bytes(uncompressed_size_bytes.try_into().map_err(|_| {
-                SteamVentError::Compression(CompressionError::InvalidData(
-                    "Failed to parse uncompressed size from VZa footer: invalid byte slice"
-                        .to_string(),
+                SteamVentError::Compression(CompressionError::InvalidLzmaHeader(
+                    "Failed to parse uncompressed size from VZa footer",
                 ))
             })?) as usize;
 
@@ -223,14 +221,14 @@ impl SteamChunk {
                     Ok(Self::Decrypted(data))
                 }
             }
-            Self::Decrypted(_) => Err(SteamVentError::ChunkState(
-                crate::error::ChunkStateError::InvalidState {
+            Self::Decrypted(_) => Err(SteamVentError::Chunk(
+                crate::error::ChunkError::UnexpectedState {
                     expected: "Encrypted",
                     actual: "Decrypted",
                 },
             )),
-            Self::Decompressed(_) => Err(SteamVentError::ChunkState(
-                crate::error::ChunkStateError::InvalidState {
+            Self::Decompressed(_) => Err(SteamVentError::Chunk(
+                crate::error::ChunkError::UnexpectedState {
                     expected: "Encrypted",
                     actual: "Decompressed",
                 },
@@ -252,10 +250,12 @@ impl SteamChunk {
                 // Verify uncompressed size matches manifest's cb_original
                 let actual_size = decompressed.len() as u32;
                 if actual_size != expected_uncompressed_size {
-                    return Err(SteamVentError::Integrity(IntegrityError::SizeMismatch {
-                        expected: expected_uncompressed_size,
-                        actual: actual_size,
-                    }));
+                    return Err(SteamVentError::Chunk(
+                        crate::error::ChunkError::SizeMismatch {
+                            expected: expected_uncompressed_size,
+                            actual: actual_size,
+                        },
+                    ));
                 }
 
                 // Verify Adler32 checksum matches manifest's crc
@@ -263,8 +263,8 @@ impl SteamChunk {
                 hasher.write_slice(&decompressed);
                 let actual_crc = hasher.checksum();
                 if actual_crc != expected_crc {
-                    return Err(SteamVentError::Integrity(
-                        IntegrityError::ChecksumMismatch {
+                    return Err(SteamVentError::Chunk(
+                        crate::error::ChunkError::ChecksumMismatch {
                             expected: expected_crc,
                             actual: actual_crc,
                         },
@@ -273,14 +273,14 @@ impl SteamChunk {
 
                 Ok(Self::Decompressed(decompressed))
             }
-            Self::Encrypted(_) => Err(SteamVentError::ChunkState(
-                crate::error::ChunkStateError::InvalidState {
+            Self::Encrypted(_) => Err(SteamVentError::Chunk(
+                crate::error::ChunkError::UnexpectedState {
                     expected: "Decrypted",
                     actual: "Encrypted",
                 },
             )),
-            Self::Decompressed(_) => Err(SteamVentError::ChunkState(
-                crate::error::ChunkStateError::InvalidState {
+            Self::Decompressed(_) => Err(SteamVentError::Chunk(
+                crate::error::ChunkError::UnexpectedState {
                     expected: "Decrypted",
                     actual: "Decompressed",
                 },

@@ -8,6 +8,7 @@ use progress::ProgressManager;
 use std::sync::Arc;
 use steam_vent_cdn::{
     CdnDownloader, Config, Credentials, DownloadItem, Result, RetryPolicy, SteamVentError,
+    WorkshopError,
 };
 use tracing_subscriber::Layer;
 use tracing_subscriber::prelude::*;
@@ -155,7 +156,7 @@ pub async fn run_download_pipeline(
         ts
     } else {
         versions.first().map(|v| v.timestamp).ok_or_else(|| {
-            steam_vent_cdn::SteamVentError::InvalidData("No versions found".to_string())
+            steam_vent_cdn::SteamVentError::Workshop(WorkshopError::NoVersionsFound)
         })?
     };
 
@@ -163,10 +164,10 @@ pub async fn run_download_pipeline(
         .iter()
         .find(|v| v.timestamp == timestamp)
         .ok_or_else(|| {
-            steam_vent_cdn::SteamVentError::InvalidData(format!(
-                "Timestamp {} not found in version history",
+            steam_vent_cdn::SteamVentError::Workshop(WorkshopError::VersionNotFound(format!(
+                "Timestamp {}",
                 timestamp
-            ))
+            )))
         })?;
 
     tracing::info!("Downloading version with timestamp: {}", timestamp);

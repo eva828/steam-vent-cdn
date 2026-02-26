@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::cdn::CdnClient;
 use crate::connection::{ConnectionExt, SteamSession};
-use crate::error::{CdnConnectionError, Result, SteamConnectionError, SteamVentError};
+use crate::error::{CdnError, Result, SteamSessionError, SteamVentError, WorkshopError};
 use steam_vent::ConnectionTrait;
 use steam_vent_proto::steammessages_clientserver_2::{
     CMsgClientGetDepotDecryptionKey, CMsgClientGetDepotDecryptionKeyResponse,
@@ -53,9 +53,8 @@ impl CdnDownloader {
             .await?;
 
         if details_resp.publishedfiledetails.is_empty() {
-            return Err(SteamVentError::InvalidData(format!(
-                "No details found for item {}",
-                item_id
+            return Err(SteamVentError::Workshop(WorkshopError::ItemDetailsMissing(
+                item_id,
             )));
         }
         Ok(details_resp.publishedfiledetails[0].clone())
@@ -73,8 +72,8 @@ impl CdnDownloader {
             .connection_mut()
             .service_method(history_req)
             .await
-            .map_err(|e| SteamConnectionError::ApiCallFailed(Box::new(e)))
-            .map_err(SteamVentError::Connection)?;
+            .map_err(|e| SteamSessionError::ApiCallFailed(Box::new(e)))
+            .map_err(SteamVentError::SteamSession)?;
 
         let versions: Vec<VersionInfo> = history_resp
             .changes
@@ -92,9 +91,7 @@ impl CdnDownloader {
             .collect();
 
         if versions.is_empty() {
-            return Err(SteamVentError::InvalidData(
-                "No version history available for this item".to_string(),
-            ));
+            return Err(SteamVentError::Workshop(WorkshopError::NoVersionsFound));
         }
 
         tracing::debug!("Found {} versions", versions.len());
@@ -120,11 +117,11 @@ impl CdnDownloader {
             .connection_mut()
             .service_method(code_req)
             .await
-            .map_err(|e| SteamConnectionError::ApiCallFailed(Box::new(e)))
-            .map_err(SteamVentError::Connection)?;
-        code_resp.manifest_request_code.ok_or_else(|| {
-            SteamVentError::CdnConnection(CdnConnectionError::ManifestRequestCodeFailed)
-        })
+            .map_err(|e| SteamSessionError::ApiCallFailed(Box::new(e)))
+            .map_err(SteamVentError::SteamSession)?;
+        code_resp
+            .manifest_request_code
+            .ok_or_else(|| SteamVentError::Cdn(CdnError::ManifestRequestCodeFailed))
     }
 
     pub(crate) async fn fetch_depot_key(&mut self, app_id: u32, depot_id: u32) -> Result<Vec<u8>> {
@@ -139,12 +136,12 @@ impl CdnDownloader {
             .connection_mut()
             .job(key_req)
             .await
-            .map_err(|e| SteamConnectionError::ApiCallFailed(Box::new(e)))
-            .map_err(SteamVentError::Connection)?;
+            .map_err(|e| SteamSessionError::ApiCallFailed(Box::new(e)))
+            .map_err(SteamVentError::SteamSession)?;
         if key_resp.eresult() != 1 {
-            return Err(SteamVentError::CdnConnection(
-                CdnConnectionError::DepotKeyFailed(key_resp.eresult()),
-            ));
+            return Err(SteamVentError::Cdn(CdnError::DepotKeyFailed(
+                key_resp.eresult(),
+            )));
         }
         Ok(key_resp.depot_encryption_key().to_vec())
     }
@@ -159,9 +156,7 @@ impl CdnDownloader {
             .await?;
         let servers = self.cdn_client.cdn_hosts().to_vec();
         if servers.is_empty() {
-            return Err(SteamVentError::CdnConnection(
-                CdnConnectionError::HostResolutionFailed,
-            ));
+            return Err(SteamVentError::Cdn(CdnError::HostResolutionFailed));
         }
 
         let depot_id = app_id;
@@ -239,12 +234,12 @@ impl CdnDownloader {
         let title = details.title.as_deref().unwrap_or("Unknown");
         tracing::info!("Title: {}", title);
 
-        let manifest_id = details.hcontent_file.ok_or_else(|| {
-            SteamVentError::InvalidData("No manifest ID (hcontent_file) found".to_string())
-        })?;
-        let app_id = details.consumer_appid.ok_or_else(|| {
-            SteamVentError::InvalidData("consumer_appid is missing in item details".to_string())
-        })?;
+        let manifest_id = details
+            .hcontent_file
+            .ok_or_else(|| SteamVentError::Workshop(WorkshopError::MissingManifestId))?;
+        let app_id = details
+            .consumer_appid
+            .ok_or_else(|| SteamVentError::Workshop(WorkshopError::MissingConsumerAppId))?;
 
         let manifest_data = self.fetch_manifest_by_id(manifest_id, app_id).await?;
         manifest_data.into_download_items()
@@ -321,10 +316,10 @@ impl CdnDownloader {
             Ok(()) => {}
             Err(e) => {
                 tracing::error!("Decode worker panicked: {}", e);
-                return Err(SteamVentError::InvalidData(format!(
+                return Err(SteamVentError::Io(std::io::Error::other(format!(
                     "Decode worker panicked: {}",
                     e
-                )));
+                ))));
             }
         }
 

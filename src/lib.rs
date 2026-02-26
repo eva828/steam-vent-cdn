@@ -13,4 +13,4 @@ pub use downloader::{
     CdnDownloader, ChunkDownloadTask, ChunkInfo, CompressedChunk, DepotContext, DownloadItem,
     DownloadedChunk, ProgressCallback, VersionInfo,
 };
-pub use error::{ChunkStateError, ManifestError, Result, SteamVentError};
+pub use error::{ChunkError, ManifestError, Result, SteamVentError, WorkshopError};
