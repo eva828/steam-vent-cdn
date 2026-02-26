@@ -119,28 +119,16 @@ impl DecodeWorker {
                     rayon::spawn(move || {
                         let depot_key = compressed.depot.depot_key.clone();
                         let compressed_data = compressed.compressed_data;
-
-                        let decrypted =
-                            SteamChunk::decrypt_only(&compressed_data, depot_key.as_deref());
-
-                        let decrypted = match decrypted {
-                            Ok(data) => data,
-                            Err(e) => {
-                                if let Err(send_err) = decode_tx.blocking_send(Err(e)) {
-                                    tracing::error!("Failed to send decryption error: {}", send_err);
-                                }
-                                return;
-                            }
-                        };
-
                         let uncompressed_size = compressed.uncompressed_size;
                         let crc = compressed.crc;
 
-                        let decompressed =
-                            SteamChunk::decompress_and_verify(&decrypted, uncompressed_size, crc);
+                        let result = SteamChunk::new(compressed_data)
+                            .decrypt(depot_key.as_deref())
+                            .and_then(|chunk| chunk.decompress_and_verify(uncompressed_size, crc));
 
-                        match decompressed {
-                            Ok(data) => {
+                        match result {
+                            Ok(chunk) => {
+                                let data = chunk.into_vec();
                                 let len = data.len() as u64;
                                 progress.on_decode_progress(len);
                                 progress.on_write_progress(len);
@@ -154,7 +142,7 @@ impl DecodeWorker {
                             }
                             Err(e) => {
                                 if let Err(send_err) = decode_tx.blocking_send(Err(e)) {
-                                    tracing::error!("Failed to send decompression error: {}", send_err);
+                                    tracing::error!("Failed to send decode error: {}", send_err);
                                 }
                             }
                         }

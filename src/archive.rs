@@ -188,23 +188,124 @@ impl<'a> ArchiveExtractor for RawArchiveExtractor<'a> {
     }
 }
 
-pub struct SteamChunk<'a> {
-    data: &'a [u8],
+/// Steamのチャンクデータの状態を表すenum
+/// Encrypted → Decrypted → Decompressed と状態遷移していく
+#[derive(Debug)]
+pub enum SteamChunk {
+    Encrypted(Vec<u8>),
+    Decrypted(Vec<u8>),
+    Decompressed(Vec<u8>),
 }
 
-impl<'a> SteamChunk<'a> {
-    pub fn new(data: &'a [u8]) -> Self {
-        Self { data }
+impl SteamChunk {
+    /// 新規作成（Encrypted状態）
+    pub fn new(data: Vec<u8>) -> Self {
+        Self::Encrypted(data)
     }
 
-    fn decrypt(&self, key: &[u8]) -> Result<Vec<u8>> {
-        if self.data.len() < 16 {
-            return Ok(self.data.to_vec());
+    /// データを所有権として取得（どの状態でも可能）
+    pub fn into_vec(self) -> Vec<u8> {
+        match self {
+            Self::Encrypted(v) | Self::Decrypted(v) | Self::Decompressed(v) => v,
+        }
+    }
+
+    /// 現在の状態のデータへの参照を取得
+    pub fn as_slice(&self) -> &[u8] {
+        match self {
+            Self::Encrypted(v) | Self::Decrypted(v) | Self::Decompressed(v) => v,
+        }
+    }
+
+    /// Encrypted → Decrypted
+    /// 既に復号済みの場合は何もしない
+    pub fn decrypt(mut self, key: Option<&[u8]>) -> Result<Self> {
+        match &self {
+            Self::Encrypted(data) => {
+                if let Some(k) = key {
+                    let decrypted = Self::perform_decrypt(data, k)?;
+                    Ok(Self::Decrypted(decrypted))
+                } else {
+                    // キーがない場合はコピーしてDecryptedに移行
+                    let data = data.clone();
+                    Ok(Self::Decrypted(data))
+                }
+            }
+            Self::Decrypted(_) | Self::Decompressed(_) => Ok(self),
+        }
+    }
+
+    /// Decrypted → Decompressed
+    /// 他の状態から呼ばれた場合はエラー
+    pub fn decompress(self) -> Result<Self> {
+        match self {
+            Self::Decrypted(data) => {
+                let extractor = Self::get_extractor(&data)?;
+                let decompressed = extractor.extract()?;
+                Ok(Self::Decompressed(decompressed))
+            }
+            Self::Encrypted(_) => Err(SteamVentError::InvalidData(
+                "Cannot decompress encrypted data. Call decrypt() first.".to_string(),
+            )),
+            Self::Decompressed(_) => Ok(self),
+        }
+    }
+
+    /// Decrypted → Decompressed（整合性検証付き）
+    pub fn decompress_and_verify(
+        self,
+        expected_uncompressed_size: u32,
+        expected_crc: u32,
+    ) -> Result<Self> {
+        match self {
+            Self::Decrypted(data) => {
+                let extractor = Self::get_extractor(&data)?;
+                let decompressed = extractor.extract()?;
+
+                // Verify uncompressed size matches manifest's cb_original
+                let actual_size = decompressed.len() as u32;
+                if actual_size != expected_uncompressed_size {
+                    return Err(SteamVentError::Integrity(IntegrityError::SizeMismatch {
+                        expected: expected_uncompressed_size,
+                        actual: actual_size,
+                    }));
+                }
+
+                // Verify Adler32 checksum matches manifest's crc
+                let mut hasher = adler::Adler32::from_checksum(0);
+                hasher.write_slice(&decompressed);
+                let actual_crc = hasher.checksum();
+                if actual_crc != expected_crc {
+                    return Err(SteamVentError::Integrity(
+                        IntegrityError::ChecksumMismatch {
+                            expected: expected_crc,
+                            actual: actual_crc,
+                        },
+                    ));
+                }
+
+                Ok(Self::Decompressed(decompressed))
+            }
+            Self::Encrypted(_) => Err(SteamVentError::InvalidData(
+                "Cannot decompress encrypted data. Call decrypt() first.".to_string(),
+            )),
+            Self::Decompressed(_) => Ok(self),
+        }
+    }
+
+    /// ワンステップで復号・解凍（後方互換性用）
+    pub fn decode(self, depot_key: Option<&[u8]>) -> Result<Self> {
+        self.decrypt(depot_key)?.decompress()
+    }
+
+    /// 実際の復号処理
+    fn perform_decrypt(data: &[u8], key: &[u8]) -> Result<Vec<u8>> {
+        if data.len() < 16 {
+            return Ok(data.to_vec());
         }
 
-        let (iv_encrypted, ciphertext) = self.data.split_at(16);
+        let (iv_encrypted, ciphertext) = data.split_at(16);
 
-        // The first 16 bytes are the IV encrypted in ECB mode
         let ecb_cipher = Aes256::new_from_slice(key)
             .map_err(EncryptionError::KeyInit)
             .map_err(SteamVentError::Encryption)?;
@@ -221,86 +322,20 @@ impl<'a> SteamChunk<'a> {
         match cipher.decrypt_padded_mut::<cbc::cipher::block_padding::Pkcs7>(&mut buffer) {
             Ok(decrypted) => Ok(decrypted.to_vec()),
             Err(_) => {
-                // Unpadding failed
-                Err(SteamVentError::Encryption(EncryptionError::Unpadding))
-            }
-        }
-    }
-
-    /// Perform AES decryption only (phase 1 of decode pipeline).
-    /// Returns owned decrypted data, or a copy of the original data if no key is provided.
-    pub fn decrypt_only(data: &[u8], depot_key: Option<&[u8]>) -> Result<Vec<u8>> {
-        let chunk = SteamChunk::new(data);
-        if let Some(key) = depot_key {
-            match chunk.decrypt(key) {
-                Ok(decrypted) => Ok(decrypted),
-                Err(e) => {
-                    let magic_bytes = &data[..data.len().min(4)];
-                    tracing::error!(
-                        "Chunk decryption failed: {} (input size: {} bytes, magic bytes: {:02X?})",
-                        e,
+                let magic_bytes = &data[..data.len().min(4)];
+                Err(SteamVentError::Encryption(EncryptionError::Decrypt(
+                    format!(
+                        "Chunk decryption failed: unpadding error (input size: {} bytes, magic bytes: {:02X?})",
                         data.len(),
                         magic_bytes
-                    );
-                    Err(SteamVentError::Encryption(EncryptionError::Decrypt(
-                        format!(
-                            "Chunk decryption failed: {} (input size: {} bytes, magic bytes: {:02X?})",
-                            e,
-                            data.len(),
-                            magic_bytes
-                        ),
-                    )))
-                }
+                    ),
+                )))
             }
-        } else {
-            Ok(data.to_vec())
         }
     }
 
-    /// Decompress already-decrypted data (phase 2 of decode pipeline).
-    pub fn decompress(data: &[u8]) -> Result<Vec<u8>> {
-        let chunk = SteamChunk::new(data);
-        let extractor = chunk.get_extractor()?;
-        extractor.extract()
-    }
-
-    /// Decompress data and verify integrity (size + CRC).
-    /// This is the CPU-heavy step for VZa/LZMA formats (~170ms).
-    pub fn decompress_and_verify(
-        data: &[u8],
-        expected_uncompressed_size: u32,
-        expected_crc: u32,
-    ) -> Result<Vec<u8>> {
-        let decompressed = Self::decompress(data)?;
-
-        // Verify uncompressed size matches manifest's cb_original
-        let actual_size = decompressed.len() as u32;
-        if actual_size != expected_uncompressed_size {
-            return Err(SteamVentError::Integrity(IntegrityError::SizeMismatch {
-                expected: expected_uncompressed_size,
-                actual: actual_size,
-            }));
-        }
-
-        // Verify Adler32 checksum matches manifest's crc
-        // Steam uses Adler32 with initial seed 0 (non-standard; RFC 1950 uses 1)
-        let mut hasher = adler::Adler32::from_checksum(0);
-        hasher.write_slice(&decompressed);
-        let actual_crc = hasher.checksum();
-        if actual_crc != expected_crc {
-            return Err(SteamVentError::Integrity(
-                IntegrityError::ChecksumMismatch {
-                    expected: expected_crc,
-                    actual: actual_crc,
-                },
-            ));
-        }
-
-        Ok(decompressed)
-    }
-
-    fn get_extractor(&self) -> Result<Box<dyn ArchiveExtractor + 'a>> {
-        match self.data {
+    fn get_extractor(data: &[u8]) -> Result<Box<dyn ArchiveExtractor + '_>> {
+        match data {
             d if d.starts_with(ZipArchiveExtractor::MAGIC) => {
                 Ok(Box::new(ZipArchiveExtractor::new(d)?))
             }
@@ -315,41 +350,5 @@ impl<'a> SteamChunk<'a> {
             }
             d => Ok(Box::new(RawArchiveExtractor::new(d)?)),
         }
-    }
-
-    pub fn decode(&self, depot_key: Option<&[u8]>) -> Result<Vec<u8>> {
-        let decrypted_buffer;
-        let mut extractor_chunk = self;
-        let temp_chunk;
-
-        if let Some(key) = depot_key {
-            match self.decrypt(key) {
-                Ok(decrypted) => {
-                    decrypted_buffer = decrypted;
-                    temp_chunk = SteamChunk::new(&decrypted_buffer);
-                    extractor_chunk = &temp_chunk;
-                }
-                Err(e) => {
-                    let magic_bytes = &self.data[..self.data.len().min(4)];
-                    tracing::error!(
-                        "Chunk decryption failed: {} (input size: {} bytes, magic bytes: {:02X?})",
-                        e,
-                        self.data.len(),
-                        magic_bytes
-                    );
-                    return Err(SteamVentError::Encryption(EncryptionError::Decrypt(
-                        format!(
-                            "Chunk decryption failed: {} (input size: {} bytes, magic bytes: {:02X?})",
-                            e,
-                            self.data.len(),
-                            magic_bytes
-                        ),
-                    )));
-                }
-            }
-        }
-
-        let extractor = extractor_chunk.get_extractor()?;
-        extractor.extract()
     }
 }
