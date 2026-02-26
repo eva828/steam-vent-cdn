@@ -17,7 +17,7 @@ async fn main() -> Result<()> {
     let steam_client = SteamClient::new(config);
     let steam_session = steam_client.connect().await?;
 
-    let mut downloader = CdnDownloader::new(steam_session);
+    let mut downloader = CdnDownloader::new(steam_session)?;
 
     if args.list_versions {
         cli::run_list_versions_pipeline(&mut downloader, args.item_id).await?;

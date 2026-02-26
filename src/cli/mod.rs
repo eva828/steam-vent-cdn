@@ -110,7 +110,17 @@ pub(crate) fn classify_items(items: Vec<DownloadItem>) -> (Vec<DownloadItem>, Ve
     let mut files = Vec::new();
 
     for item in items {
-        if item.flags.unwrap_or(0) & FLAG_DIRECTORY != 0 {
+        let is_directory = match item.flags {
+            Some(flags) => flags & FLAG_DIRECTORY != 0,
+            None => {
+                tracing::warn!(
+                    "flags field is missing for item '{}', treating as file",
+                    item.filename
+                );
+                false
+            }
+        };
+        if is_directory {
             directories.push(item);
         } else {
             files.push(item);

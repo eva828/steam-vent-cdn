@@ -1,6 +1,6 @@
 use crate::error::{CompressionError, EncryptionError, Result, SteamVentError};
-use aes::Aes256;
 use aes::cipher::{BlockDecrypt, KeyInit};
+use aes::Aes256;
 use cbc::cipher::{BlockDecryptMut, KeyIvInit};
 use std::io::{Cursor, Read};
 
@@ -101,7 +101,12 @@ impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
         // Uncompressed size from footer: bytes [len-6..len-2] (little endian)
         let uncompressed_size_bytes = &self.data[self.data.len() - 6..self.data.len() - 2];
         let uncompressed_size =
-            u32::from_le_bytes(uncompressed_size_bytes.try_into().unwrap_or([0; 4])) as usize;
+            u32::from_le_bytes(uncompressed_size_bytes.try_into().map_err(|_| {
+                SteamVentError::Compression(CompressionError::InvalidData(
+                    "Failed to parse uncompressed size from VZa footer: invalid byte slice"
+                        .to_string(),
+                ))
+            })?) as usize;
 
         // Compressed data: from offset 12 to len - 10
         let compressed_end = self.data.len() - 10;

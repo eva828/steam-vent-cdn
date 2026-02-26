@@ -40,6 +40,12 @@ pub enum CdnConnectionError {
 
     #[error("Failed to get depot decryption key: EResult {0}")]
     DepotKeyFailed(i32),
+
+    #[error("Invalid configuration: {0}")]
+    InvalidConfiguration(String),
+
+    #[error("Download semaphore closed")]
+    SemaphoreClosed,
 }
 
 #[derive(Error, Debug)]

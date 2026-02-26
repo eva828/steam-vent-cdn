@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::cdn::CdnClient;
-use crate::error::Result;
+use crate::error::{Result, SteamVentError};
 
 use super::models::{
     ChunkDownloadTask, CompressedChunk, DownloadItem, DownloadedChunk, ProgressCallback,
@@ -40,7 +40,18 @@ impl DownloadWorker {
             let progress = self.progress.clone();
 
             tokio::spawn(async move {
-                let _permit = download_sem.acquire().await.unwrap();
+                let _permit = match download_sem.acquire().await {
+                    Ok(permit) => permit,
+                    Err(_) => {
+                        // Semaphore closed - send error to channel
+                        let _ = download_tx
+                            .send(Err(SteamVentError::CdnConnection(
+                                crate::error::CdnConnectionError::SemaphoreClosed,
+                            )))
+                            .await;
+                        return;
+                    }
+                };
                 let start_server = task_index % task.depot.server_hosts.len().max(1);
                 let compressed_data = cdn_client
                     .download_chunk(
@@ -54,6 +65,7 @@ impl DownloadWorker {
                 match compressed_data {
                     Ok(data) => {
                         progress.on_download_progress(task.compressed_size as u64);
+                        // Ignore send error (receiver dropped is normal shutdown)
                         let _ = download_tx
                             .send(Ok(CompressedChunk {
                                 depot: task.depot,
@@ -66,6 +78,7 @@ impl DownloadWorker {
                             .await;
                     }
                     Err(e) => {
+                        // Ignore send error (receiver dropped is normal shutdown)
                         let _ = download_tx.send(Err(e)).await;
                     }
                 }
@@ -112,7 +125,9 @@ impl DecodeWorker {
                         let decrypted = match decrypted {
                             Ok(data) => data,
                             Err(e) => {
-                                let _ = decode_tx.blocking_send(Err(e));
+                                if let Err(send_err) = decode_tx.blocking_send(Err(e)) {
+                                    tracing::error!("Failed to send decryption error: {}", send_err);
+                                }
                                 return;
                             }
                         };
@@ -128,20 +143,26 @@ impl DecodeWorker {
                                 let len = data.len() as u64;
                                 progress.on_decode_progress(len);
                                 progress.on_write_progress(len);
-                                let _ = decode_tx.blocking_send(Ok(DownloadedChunk {
+                                if let Err(e) = decode_tx.blocking_send(Ok(DownloadedChunk {
                                     file_index: compressed.file_index,
                                     chunk_index: compressed.chunk_index,
                                     data,
-                                }));
+                                })) {
+                                    tracing::error!("Failed to send decoded chunk: {}", e);
+                                }
                             }
                             Err(e) => {
-                                let _ = decode_tx.blocking_send(Err(e));
+                                if let Err(send_err) = decode_tx.blocking_send(Err(e)) {
+                                    tracing::error!("Failed to send decompression error: {}", send_err);
+                                }
                             }
                         }
                     });
                 }
                 Err(e) => {
-                    let _ = decode_tx.send(Err(e)).await;
+                    if let Err(send_err) = decode_tx.send(Err(e)).await {
+                        tracing::error!("Failed to send decode stream error: {}", send_err);
+                    }
                 }
             }
         }
@@ -184,8 +205,9 @@ impl WriteWorker {
 
                     if buffers.len() == total_chunks {
                         let file_path = self.base_path.join(&file.filename);
-                        let mut file_data: Vec<(usize, Vec<u8>)> =
-                            chunk_buffers.remove(&chunk.file_index).unwrap();
+                        let mut file_data: Vec<(usize, Vec<u8>)> = chunk_buffers
+                            .remove(&chunk.file_index)
+                            .expect("Failed to remove file data from chunk_buffers: this should not happen since we just verified buffers.len() == total_chunks");
                         file_data.sort_by_key(|(idx, _)| *idx);
 
                         let mut full_data = Vec::new();

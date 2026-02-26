@@ -26,12 +26,12 @@ pub struct CdnDownloader {
 }
 
 impl CdnDownloader {
-    pub fn new(steam_client: SteamSession) -> Self {
+    pub fn new(steam_client: SteamSession) -> Result<Self> {
         let config = steam_client.config().clone();
-        Self {
+        Ok(Self {
             steam_client,
-            cdn_client: CdnClient::new(config),
-        }
+            cdn_client: CdnClient::new(config)?,
+        })
     }
 
     pub(crate) async fn fetch_item_details(
@@ -185,15 +185,24 @@ impl CdnDownloader {
         let mut need_key_for_filenames = false;
         let mut depot_id_for_key = app_id;
 
-        if let Some(ref m) = metadata
-            && m.filenames_encrypted.unwrap_or(false)
-        {
-            need_key_for_filenames = true;
-            depot_id_for_key = m.depot_id.unwrap_or(app_id);
-            tracing::debug!(
-                "Manifest filenames are encrypted (depot_id: {}).",
-                depot_id_for_key
-            );
+        if let Some(ref m) = metadata {
+            let filenames_encrypted = m.filenames_encrypted.ok_or_else(|| {
+                SteamVentError::Manifest(crate::error::ManifestError::Custom(
+                    "filenames_encrypted field is missing in manifest metadata".to_string(),
+                ))
+            })?;
+            if filenames_encrypted {
+                need_key_for_filenames = true;
+                depot_id_for_key = m.depot_id.ok_or_else(|| {
+                    SteamVentError::Manifest(crate::error::ManifestError::Custom(
+                        "depot_id is required when filenames are encrypted".to_string(),
+                    ))
+                })?;
+                tracing::debug!(
+                    "Manifest filenames are encrypted (depot_id: {}).",
+                    depot_id_for_key
+                );
+            }
         }
 
         match self.fetch_depot_key(app_id, depot_id_for_key).await {
@@ -233,8 +242,11 @@ impl CdnDownloader {
         let manifest_id = details.hcontent_file.ok_or_else(|| {
             SteamVentError::InvalidData("No manifest ID (hcontent_file) found".to_string())
         })?;
-        let config_app_id = self.steam_client.config().app_id;
-        let app_id = details.consumer_appid.unwrap_or(config_app_id);
+        let app_id = details.consumer_appid.ok_or_else(|| {
+            SteamVentError::Manifest(crate::error::ManifestError::Custom(
+                "consumer_appid is missing in item details".to_string(),
+            ))
+        })?;
 
         let manifest_data = self.fetch_manifest_by_id(manifest_id, app_id).await?;
         manifest_data.into_download_items()
@@ -265,9 +277,16 @@ impl CdnDownloader {
         let parallel_download = self.steam_client.config().parallel_download;
 
         let download_channel_size = (parallel_download * 2).max(64);
-        let logical_cores = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(8);
+        let logical_cores = match std::thread::available_parallelism() {
+            Ok(n) => n.get(),
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to detect CPU parallelism ({}), falling back to 8 cores",
+                    e
+                );
+                8
+            }
+        };
         let decode_channel_size = (logical_cores * 2).max(32);
 
         let (download_tx, download_rx) =
@@ -300,7 +319,16 @@ impl CdnDownloader {
         // The write worker runs in the current task
         let write_result = write_worker.start(decode_rx).await;
 
-        let _ = decode_handle.await;
+        match decode_handle.await {
+            Ok(()) => {}
+            Err(e) => {
+                tracing::error!("Decode worker panicked: {}", e);
+                return Err(SteamVentError::InvalidData(format!(
+                    "Decode worker panicked: {}",
+                    e
+                )));
+            }
+        }
 
         write_result
     }

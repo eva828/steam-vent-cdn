@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::error::{Result, SteamVentError};
+use crate::error::{ManifestError, Result, SteamVentError};
 use steam_vent_proto::content_manifest::ContentManifestPayload;
 
 pub trait ProgressCallback: Send + Sync {
@@ -57,25 +57,37 @@ impl DownloadManifest {
         let mut items = Vec::new();
 
         for mut mapping in self.manifest.mappings {
-            let filename = mapping.filename.take().unwrap_or_default();
+            let filename = mapping.filename.take().ok_or_else(|| {
+                SteamVentError::Manifest(ManifestError::Custom(
+                    "filename is missing in manifest mapping".to_string(),
+                ))
+            })?;
             let chunks: Vec<ChunkInfo> = mapping
                 .chunks
                 .into_iter()
                 .map(|mut c| -> Result<ChunkInfo> {
                     let sha = c.sha.take().ok_or_else(|| {
-                        SteamVentError::InvalidData("Chunk SHA is missing".to_string())
+                        SteamVentError::Manifest(ManifestError::Custom(
+                            "Chunk SHA is missing".to_string(),
+                        ))
                     })?;
 
                     let crc = c.crc.take().ok_or_else(|| {
-                        SteamVentError::InvalidData("Chunk CRC is missing".to_string())
+                        SteamVentError::Manifest(ManifestError::Custom(
+                            "Chunk CRC is missing".to_string(),
+                        ))
                     })?;
 
                     let uncompressed_size = c.cb_original.take().ok_or_else(|| {
-                        SteamVentError::InvalidData("Chunk cb_original is missing".to_string())
+                        SteamVentError::Manifest(ManifestError::Custom(
+                            "Chunk cb_original is missing".to_string(),
+                        ))
                     })?;
 
                     let compressed_size = c.cb_compressed.take().ok_or_else(|| {
-                        SteamVentError::InvalidData("Chunk cb_compressed is missing".to_string())
+                        SteamVentError::Manifest(ManifestError::Custom(
+                            "Chunk cb_compressed is missing".to_string(),
+                        ))
                     })?;
 
                     Ok(ChunkInfo {

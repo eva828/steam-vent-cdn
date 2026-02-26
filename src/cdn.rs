@@ -22,16 +22,21 @@ pub(crate) struct CdnClient {
 }
 
 impl CdnClient {
-    pub fn new(config: Config) -> Self {
-        Self {
-            http_client: HttpClient::builder()
-                .timeout(config.timeout)
-                .http2_prior_knowledge()
-                .build()
-                .unwrap_or_else(|_| HttpClient::new()),
+    pub fn new(config: Config) -> Result<Self> {
+        let http_client = HttpClient::builder()
+            .timeout(config.timeout)
+            .http2_prior_knowledge()
+            .build()
+            .map_err(|e| {
+                SteamVentError::CdnConnection(CdnConnectionError::InvalidConfiguration(
+                    format!("Failed to build HTTP client with custom timeout: {}", e),
+                ))
+            })?;
+        Ok(Self {
+            http_client,
             cdn_servers: Vec::new(),
             config,
-        }
+        })
     }
 
     pub async fn resolve_cdn_hosts(&mut self, connection: &mut impl ConnectionExt) -> Result<()> {
@@ -83,9 +88,18 @@ impl CdnClient {
             let b_is_cache = b.server_type == "SteamCache";
             // SteamCache first, then CDN
             b_is_cache.cmp(&a_is_cache).then_with(|| {
-                a.weighted_load
-                    .partial_cmp(&b.weighted_load)
-                    .unwrap_or(std::cmp::Ordering::Equal)
+                a.weighted_load.partial_cmp(&b.weighted_load).unwrap_or_else(|| {
+                    if a.weighted_load.is_nan() || b.weighted_load.is_nan() {
+                        tracing::warn!(
+                            "CDN server has invalid weighted_load (NaN): {}={}, {}={}",
+                            a.vhost,
+                            a.weighted_load,
+                            b.vhost,
+                            b.weighted_load
+                        );
+                    }
+                    std::cmp::Ordering::Equal
+                })
             })
         });
 
