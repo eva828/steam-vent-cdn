@@ -106,6 +106,12 @@ pub enum ManifestError {
 }
 
 #[derive(Error, Debug)]
+pub enum ChunkStateError {
+    #[error("Invalid chunk state: expected {expected}, got {actual}")]
+    InvalidState { expected: &'static str, actual: &'static str },
+}
+
+#[derive(Error, Debug)]
 pub enum SteamVentError {
     #[error("Steam connection error")]
     Connection(#[from] SteamConnectionError),
@@ -121,6 +127,9 @@ pub enum SteamVentError {
 
     #[error("Integrity error")]
     Integrity(#[from] IntegrityError),
+
+    #[error("Chunk state error")]
+    ChunkState(#[from] ChunkStateError),
 
     #[error("Network error")]
     Network(#[from] reqwest::Error),

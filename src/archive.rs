@@ -198,56 +198,43 @@ pub enum SteamChunk {
 }
 
 impl SteamChunk {
-    /// 新規作成（Encrypted状態）
+    /// 新規作成
     pub fn new(data: Vec<u8>) -> Self {
         Self::Encrypted(data)
     }
 
-    /// データを所有権として取得（どの状態でも可能）
+    /// データを所有権として取得
     pub fn into_vec(self) -> Vec<u8> {
         match self {
             Self::Encrypted(v) | Self::Decrypted(v) | Self::Decompressed(v) => v,
         }
     }
 
-    /// 現在の状態のデータへの参照を取得
-    pub fn as_slice(&self) -> &[u8] {
-        match self {
-            Self::Encrypted(v) | Self::Decrypted(v) | Self::Decompressed(v) => v,
-        }
-    }
-
     /// Encrypted → Decrypted
-    /// 既に復号済みの場合は何もしない
-    pub fn decrypt(mut self, key: Option<&[u8]>) -> Result<Self> {
-        match &self {
+    /// 想定外の状態の場合はエラー
+    pub fn decrypt(self, key: Option<&[u8]>) -> Result<Self> {
+        match self {
             Self::Encrypted(data) => {
                 if let Some(k) = key {
-                    let decrypted = Self::perform_decrypt(data, k)?;
+                    let decrypted = Self::perform_decrypt(&data, k)?;
                     Ok(Self::Decrypted(decrypted))
                 } else {
-                    // キーがない場合はコピーしてDecryptedに移行
-                    let data = data.clone();
+                    // キーがない場合はそのままDecryptedに移行
                     Ok(Self::Decrypted(data))
                 }
             }
-            Self::Decrypted(_) | Self::Decompressed(_) => Ok(self),
-        }
-    }
-
-    /// Decrypted → Decompressed
-    /// 他の状態から呼ばれた場合はエラー
-    pub fn decompress(self) -> Result<Self> {
-        match self {
-            Self::Decrypted(data) => {
-                let extractor = Self::get_extractor(&data)?;
-                let decompressed = extractor.extract()?;
-                Ok(Self::Decompressed(decompressed))
-            }
-            Self::Encrypted(_) => Err(SteamVentError::InvalidData(
-                "Cannot decompress encrypted data. Call decrypt() first.".to_string(),
+            Self::Decrypted(_) => Err(SteamVentError::ChunkState(
+                crate::error::ChunkStateError::InvalidState {
+                    expected: "Encrypted",
+                    actual: "Decrypted",
+                },
             )),
-            Self::Decompressed(_) => Ok(self),
+            Self::Decompressed(_) => Err(SteamVentError::ChunkState(
+                crate::error::ChunkStateError::InvalidState {
+                    expected: "Encrypted",
+                    actual: "Decompressed",
+                },
+            )),
         }
     }
 
@@ -286,16 +273,19 @@ impl SteamChunk {
 
                 Ok(Self::Decompressed(decompressed))
             }
-            Self::Encrypted(_) => Err(SteamVentError::InvalidData(
-                "Cannot decompress encrypted data. Call decrypt() first.".to_string(),
+            Self::Encrypted(_) => Err(SteamVentError::ChunkState(
+                crate::error::ChunkStateError::InvalidState {
+                    expected: "Decrypted",
+                    actual: "Encrypted",
+                },
             )),
-            Self::Decompressed(_) => Ok(self),
+            Self::Decompressed(_) => Err(SteamVentError::ChunkState(
+                crate::error::ChunkStateError::InvalidState {
+                    expected: "Decrypted",
+                    actual: "Decompressed",
+                },
+            )),
         }
-    }
-
-    /// ワンステップで復号・解凍（後方互換性用）
-    pub fn decode(self, depot_key: Option<&[u8]>) -> Result<Self> {
-        self.decrypt(depot_key)?.decompress()
     }
 
     /// 実際の復号処理
