@@ -1,6 +1,6 @@
-pub mod client;
+pub mod downloader;
 pub mod models;
 pub mod workers;
 
-pub use client::*;
+pub use downloader::*;
 pub use models::*;

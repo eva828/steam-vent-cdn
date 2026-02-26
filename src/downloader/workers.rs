@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::archive::SteamChunk;
 use crate::cdn::CdnClient;
 use crate::error::{Result, SteamVentError};
 
@@ -120,7 +121,7 @@ impl DecodeWorker {
                         let compressed_data = compressed.compressed_data;
 
                         let decrypted =
-                            CdnClient::decrypt_chunk(&compressed_data, depot_key.as_deref());
+                            SteamChunk::decrypt_only(&compressed_data, depot_key.as_deref());
 
                         let decrypted = match decrypted {
                             Ok(data) => data,
@@ -136,7 +137,7 @@ impl DecodeWorker {
                         let crc = compressed.crc;
 
                         let decompressed =
-                            CdnClient::decompress_and_verify(&decrypted, uncompressed_size, crc);
+                            SteamChunk::decompress_and_verify(&decrypted, uncompressed_size, crc);
 
                         match decompressed {
                             Ok(data) => {

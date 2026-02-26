@@ -264,6 +264,41 @@ impl<'a> SteamChunk<'a> {
         extractor.extract()
     }
 
+    /// Decompress data and verify integrity (size + CRC).
+    /// This is the CPU-heavy step for VZa/LZMA formats (~170ms).
+    pub fn decompress_and_verify(
+        data: &[u8],
+        expected_uncompressed_size: u32,
+        expected_crc: u32,
+    ) -> Result<Vec<u8>> {
+        let decompressed = Self::decompress(data)?;
+
+        // Verify uncompressed size matches manifest's cb_original
+        let actual_size = decompressed.len() as u32;
+        if actual_size != expected_uncompressed_size {
+            return Err(SteamVentError::Integrity(IntegrityError::SizeMismatch {
+                expected: expected_uncompressed_size,
+                actual: actual_size,
+            }));
+        }
+
+        // Verify Adler32 checksum matches manifest's crc
+        // Steam uses Adler32 with initial seed 0 (non-standard; RFC 1950 uses 1)
+        let mut hasher = adler::Adler32::from_checksum(0);
+        hasher.write_slice(&decompressed);
+        let actual_crc = hasher.checksum();
+        if actual_crc != expected_crc {
+            return Err(SteamVentError::Integrity(
+                IntegrityError::ChecksumMismatch {
+                    expected: expected_crc,
+                    actual: actual_crc,
+                },
+            ));
+        }
+
+        Ok(decompressed)
+    }
+
     fn get_extractor(&self) -> Result<Box<dyn ArchiveExtractor + 'a>> {
         match self.data {
             d if d.starts_with(ZipArchiveExtractor::MAGIC) => {
