@@ -92,8 +92,17 @@ pub enum ManifestError {
     #[error("Failed to decode manifest: {0}")]
     Decode(String),
 
-    #[error("Manifest error: {0}")]
-    Custom(String),
+    #[error("Segment length {length} exceeds remaining data {remaining}")]
+    SegmentLengthExceeded { length: usize, remaining: usize },
+
+    #[error("Unknown segment magic: {0:#010X}")]
+    UnknownSegmentMagic(u32),
+
+    #[error("No Payload segment found in manifest")]
+    MissingPayload,
+
+    #[error("Missing field in manifest: {0}")]
+    MissingField(&'static str),
 }
 
 #[derive(Error, Debug)]

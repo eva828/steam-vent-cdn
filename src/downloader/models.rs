@@ -58,36 +58,26 @@ impl DownloadManifest {
 
         for mut mapping in self.manifest.mappings {
             let filename = mapping.filename.take().ok_or_else(|| {
-                SteamVentError::Manifest(ManifestError::Custom(
-                    "filename is missing in manifest mapping".to_string(),
-                ))
+                SteamVentError::Manifest(ManifestError::MissingField("mapping.filename"))
             })?;
             let chunks: Vec<ChunkInfo> = mapping
                 .chunks
                 .into_iter()
                 .map(|mut c| -> Result<ChunkInfo> {
                     let sha = c.sha.take().ok_or_else(|| {
-                        SteamVentError::Manifest(ManifestError::Custom(
-                            "Chunk SHA is missing".to_string(),
-                        ))
+                        SteamVentError::Manifest(ManifestError::MissingField("chunk.sha"))
                     })?;
 
                     let crc = c.crc.take().ok_or_else(|| {
-                        SteamVentError::Manifest(ManifestError::Custom(
-                            "Chunk CRC is missing".to_string(),
-                        ))
+                        SteamVentError::Manifest(ManifestError::MissingField("chunk.crc"))
                     })?;
 
                     let uncompressed_size = c.cb_original.take().ok_or_else(|| {
-                        SteamVentError::Manifest(ManifestError::Custom(
-                            "Chunk cb_original is missing".to_string(),
-                        ))
+                        SteamVentError::Manifest(ManifestError::MissingField("chunk.cb_original"))
                     })?;
 
                     let compressed_size = c.cb_compressed.take().ok_or_else(|| {
-                        SteamVentError::Manifest(ManifestError::Custom(
-                            "Chunk cb_compressed is missing".to_string(),
-                        ))
+                        SteamVentError::Manifest(ManifestError::MissingField("chunk.cb_compressed"))
                     })?;
 
                     Ok(ChunkInfo {

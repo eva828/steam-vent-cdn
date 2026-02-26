@@ -110,11 +110,12 @@ pub(crate) fn parse_manifest(
                 length,
                 payload_bytes.len() - cursor - 8
             );
-            return Err(SteamVentError::Manifest(ManifestError::Custom(format!(
-                "Segment length {} exceeds remaining data {}",
-                length,
-                payload_bytes.len() - cursor - 8
-            ))));
+            return Err(SteamVentError::Manifest(
+                ManifestError::SegmentLengthExceeded {
+                    length,
+                    remaining: payload_bytes.len() - cursor - 8,
+                },
+            ));
         }
 
         let segment_data = &payload_bytes[cursor + 8..cursor + 8 + length];
@@ -136,10 +137,9 @@ pub(crate) fn parse_manifest(
             tracing::debug!("Found Signature segment (skipping)");
         } else {
             tracing::error!("Unknown segment magic: 0x{:08X}", magic);
-            return Err(SteamVentError::Manifest(ManifestError::Custom(format!(
-                "Unknown segment magic: 0x{:08X}",
-                magic
-            ))));
+            return Err(SteamVentError::Manifest(
+                ManifestError::UnknownSegmentMagic(magic),
+            ));
         }
 
         cursor += 8 + length;
@@ -147,9 +147,7 @@ pub(crate) fn parse_manifest(
 
     if final_payload.is_empty() {
         tracing::error!("No Payload segment found, manifest is invalid");
-        return Err(SteamVentError::Manifest(ManifestError::Custom(
-            "No Payload segment found in manifest".to_string(),
-        )));
+        return Err(SteamVentError::Manifest(ManifestError::MissingPayload));
     }
 
     let manifest = ContentManifestPayload::parse_from_bytes(&final_payload)

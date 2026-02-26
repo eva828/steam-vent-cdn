@@ -7,8 +7,7 @@ use indicatif::MultiProgress;
 use progress::ProgressManager;
 use std::sync::Arc;
 use steam_vent_cdn::{
-    CdnDownloader, Config, Credentials, DownloadItem, ManifestError, Result, RetryPolicy,
-    SteamVentError,
+    CdnDownloader, Config, Credentials, DownloadItem, Result, RetryPolicy, SteamVentError,
 };
 use tracing_subscriber::Layer;
 use tracing_subscriber::prelude::*;
@@ -79,7 +78,7 @@ pub fn resolve_credentials(
         (Some(username), Some(password)) => Ok(Credentials::UserPass { username, password }),
         (Some(username), None) => {
             let password = rpassword::prompt_password("Password: ").map_err(|e| {
-                SteamVentError::Manifest(ManifestError::Custom(format!(
+                SteamVentError::Io(std::io::Error::other(format!(
                     "Password input failed: {}",
                     e
                 )))

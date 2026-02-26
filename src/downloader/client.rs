@@ -187,15 +187,15 @@ impl CdnDownloader {
 
         if let Some(ref m) = metadata {
             let filenames_encrypted = m.filenames_encrypted.ok_or_else(|| {
-                SteamVentError::Manifest(crate::error::ManifestError::Custom(
-                    "filenames_encrypted field is missing in manifest metadata".to_string(),
+                SteamVentError::Manifest(crate::error::ManifestError::MissingField(
+                    "metadata.filenames_encrypted",
                 ))
             })?;
             if filenames_encrypted {
                 need_key_for_filenames = true;
                 depot_id_for_key = m.depot_id.ok_or_else(|| {
-                    SteamVentError::Manifest(crate::error::ManifestError::Custom(
-                        "depot_id is required when filenames are encrypted".to_string(),
+                    SteamVentError::Manifest(crate::error::ManifestError::MissingField(
+                        "metadata.depot_id",
                     ))
                 })?;
                 tracing::debug!(
@@ -243,9 +243,7 @@ impl CdnDownloader {
             SteamVentError::InvalidData("No manifest ID (hcontent_file) found".to_string())
         })?;
         let app_id = details.consumer_appid.ok_or_else(|| {
-            SteamVentError::Manifest(crate::error::ManifestError::Custom(
-                "consumer_appid is missing in item details".to_string(),
-            ))
+            SteamVentError::InvalidData("consumer_appid is missing in item details".to_string())
         })?;
 
         let manifest_data = self.fetch_manifest_by_id(manifest_id, app_id).await?;
