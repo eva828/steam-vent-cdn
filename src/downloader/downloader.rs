@@ -180,7 +180,7 @@ impl CdnDownloader {
         });
 
         for (i, s) in servers.iter().enumerate() {
-            tracing::info!(
+            tracing::debug!(
                 "CDN server [{}]: {} (type={}, load={}, weighted_load={:.1}, priority={})",
                 i,
                 s.vhost,
