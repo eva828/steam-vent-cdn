@@ -173,7 +173,9 @@ pub async fn run_download_pipeline(
     tracing::info!("Downloading version with timestamp: {}", timestamp);
     tracing::info!("Description: {}", version_info.description);
 
-    let items = downloader.fetch_manifest_info(args.item_id).await?;
+    let items = downloader
+        .fetch_manifest_info(args.item_id, version_info.manifest_id)
+        .await?;
 
     let base_path = args
         .output

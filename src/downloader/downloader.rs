@@ -340,15 +340,25 @@ impl CdnDownloader {
         Ok(DownloadManifest { manifest, depot })
     }
 
-    pub async fn fetch_manifest_info(&mut self, item_id: u64) -> Result<Vec<DownloadItem>> {
+    /// Fetch the latest manifest ID for a workshop item.
+    pub async fn fetch_latest_manifest_id(&mut self, item_id: u64) -> Result<u64> {
+        let details = self.fetch_item_details(item_id).await?;
+        details
+            .hcontent_file
+            .ok_or_else(|| SteamVentError::Workshop(WorkshopError::MissingManifestId))
+    }
+
+    /// Fetch manifest info for a specific manifest ID.
+    pub async fn fetch_manifest_info(
+        &mut self,
+        item_id: u64,
+        manifest_id: u64,
+    ) -> Result<Vec<DownloadItem>> {
         let details = self.fetch_item_details(item_id).await?;
 
         let title = details.title.as_deref().unwrap_or("Unknown");
         tracing::info!("Title: {}", title);
 
-        let manifest_id = details
-            .hcontent_file
-            .ok_or_else(|| SteamVentError::Workshop(WorkshopError::MissingManifestId))?;
         let app_id = details
             .consumer_appid
             .ok_or_else(|| SteamVentError::Workshop(WorkshopError::MissingConsumerAppId))?;
