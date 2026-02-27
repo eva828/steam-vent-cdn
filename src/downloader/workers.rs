@@ -2,15 +2,16 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::archive::SteamChunk;
-use crate::cdn::CdnClient;
 use crate::error::{Result, SteamVentError};
+
+use super::http::HttpFetcher;
 
 use super::models::{
     ChunkDownloadTask, CompressedChunk, DownloadItem, DownloadedChunk, ProgressCallback,
 };
 
 pub struct DownloadWorker {
-    cdn_client: CdnClient,
+    http_fetcher: HttpFetcher,
     download_sem: Arc<tokio::sync::Semaphore>,
     progress: Arc<dyn ProgressCallback>,
     download_tx: tokio::sync::mpsc::Sender<Result<CompressedChunk>>,
@@ -18,13 +19,13 @@ pub struct DownloadWorker {
 
 impl DownloadWorker {
     pub fn new(
-        cdn_client: CdnClient,
+        http_fetcher: HttpFetcher,
         parallel_download: usize,
         progress: Arc<dyn ProgressCallback>,
         download_tx: tokio::sync::mpsc::Sender<Result<CompressedChunk>>,
     ) -> Self {
         Self {
-            cdn_client,
+            http_fetcher,
             download_sem: Arc::new(tokio::sync::Semaphore::new(parallel_download)),
             progress,
             download_tx,
@@ -37,7 +38,7 @@ impl DownloadWorker {
         for (task_index, task) in tasks.into_iter().enumerate() {
             let download_sem = self.download_sem.clone();
             let download_tx = download_tx.clone();
-            let cdn_client = self.cdn_client.clone();
+            let http_fetcher = self.http_fetcher.clone();
             let progress = self.progress.clone();
 
             tokio::spawn(async move {
@@ -54,7 +55,7 @@ impl DownloadWorker {
                     }
                 };
                 let start_server = task_index % task.depot.server_hosts.len().max(1);
-                let compressed_data = cdn_client
+                let compressed_data = http_fetcher
                     .download_chunk(
                         &task.depot.server_hosts,
                         task.depot.depot_id,

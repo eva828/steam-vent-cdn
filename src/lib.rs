@@ -1,5 +1,4 @@
 mod archive;
-mod cdn;
 mod config;
 mod connection;
 mod downloader;
