@@ -63,6 +63,10 @@ impl DownloadManifest {
             let filename = mapping.filename.take().ok_or_else(|| {
                 SteamVentError::Manifest(ManifestError::MissingField("mapping.filename"))
             })?;
+            // Normalize Windows-style path separators to Unix-style.
+            // Steam manifests may contain backslashes from Windows paths,
+            // which would be treated as literal filename characters on Linux.
+            let filename = filename.replace('\\', "/");
             let chunks: Vec<ChunkInfo> = mapping
                 .chunks
                 .into_iter()
