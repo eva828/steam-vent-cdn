@@ -1,8 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
 use std::sync::Arc;
-
-use tokio::io::AsyncWriteExt;
 
 use crate::archive::SteamChunk;
 use crate::error::{Result, SteamVentError};
@@ -11,6 +8,7 @@ use super::http::HttpFetcher;
 
 use super::models::{
     ChunkDownloadTask, CompressedChunk, DownloadItem, DownloadedChunk, ProgressCallback,
+    ReassembledChunk,
 };
 
 pub struct DownloadWorker {
@@ -163,183 +161,184 @@ impl DecodeWorker {
     }
 }
 
-/// Tracks the write state for a single file being streamed to disk.
-struct FileWriteState {
-    file_handle: tokio::fs::File,
-    file_path: PathBuf,
-    /// Next byte offset we expect to write (i.e., current end of contiguous written region).
+/// Tracks the reassembly state for a single file's chunks.
+struct FileReassemblyState {
+    /// Next byte offset we expect to emit (i.e., current end of contiguous region).
     next_offset: u64,
     /// Chunks that arrived out of order, keyed by their byte offset.
     pending_chunks: BTreeMap<u64, Vec<u8>>,
-    /// Number of chunks already written to disk.
-    chunks_written: usize,
+    /// Number of chunks already emitted.
+    chunks_emitted: usize,
     /// Total number of chunks expected for this file.
     total_chunks: usize,
-    /// Running count of bytes written (for progress reporting on completion).
-    bytes_written: u64,
 }
 
-impl FileWriteState {
-    /// Flush any pending chunks that are contiguous from `next_offset`.
-    /// Returns the number of chunks flushed.
-    async fn flush_pending(&mut self) -> std::io::Result<usize> {
-        let mut flushed = 0usize;
-        while let Some(entry) = self.pending_chunks.first_entry() {
-            if *entry.key() != self.next_offset {
-                break;
-            }
-            let data = entry.remove();
-            self.file_handle.write_all(&data).await?;
-            self.next_offset += data.len() as u64;
-            self.bytes_written += data.len() as u64;
-            self.chunks_written += 1;
-            flushed += 1;
-        }
-        Ok(flushed)
-    }
-
+impl FileReassemblyState {
     fn is_complete(&self) -> bool {
-        self.chunks_written == self.total_chunks
+        self.chunks_emitted == self.total_chunks
     }
 }
 
-pub struct WriteWorker {
-    base_path: PathBuf,
+/// Receives decoded (but potentially out-of-order) chunks and re-emits them
+/// in sequential offset order per file as [`ReassembledChunk`]s.
+///
+/// This worker does **no** file I/O — it only buffers and reorders.
+pub(crate) struct ReassemblyWorker {
+    reassembly_tx: tokio::sync::mpsc::Sender<Result<ReassembledChunk>>,
     progress: Arc<dyn ProgressCallback>,
     files: Arc<Vec<DownloadItem>>,
 }
 
-impl WriteWorker {
+impl ReassemblyWorker {
     pub fn new(
-        base_path: std::path::PathBuf,
+        reassembly_tx: tokio::sync::mpsc::Sender<Result<ReassembledChunk>>,
         progress: Arc<dyn ProgressCallback>,
         files: Arc<Vec<DownloadItem>>,
     ) -> Self {
         Self {
-            base_path,
+            reassembly_tx,
             progress,
             files,
         }
     }
 
-    /// Create a `FileWriteState` for the given file index, creating the file on disk.
-    async fn open_file_state(&self, file_index: usize) -> Result<FileWriteState> {
-        let file = &self.files[file_index];
-        let file_path = self.base_path.join(&file.filename);
-
-        if let Some(p) = file_path.parent() {
-            tokio::fs::create_dir_all(p).await?;
+    /// Flush any pending chunks that are contiguous from `next_offset` and
+    /// send them as `ReassembledChunk`s.
+    async fn flush_pending(
+        state: &mut FileReassemblyState,
+        file_index: usize,
+        tx: &tokio::sync::mpsc::Sender<Result<ReassembledChunk>>,
+        progress: &dyn ProgressCallback,
+    ) -> Result<()> {
+        while let Some(entry) = state.pending_chunks.first_entry() {
+            if *entry.key() != state.next_offset {
+                break;
+            }
+            let data = entry.remove();
+            let len = data.len() as u64;
+            state.next_offset += len;
+            state.chunks_emitted += 1;
+            let is_last = state.is_complete();
+            progress.on_write_progress(len);
+            if let Err(e) = tx
+                .send(Ok(ReassembledChunk {
+                    file_index,
+                    offset: state.next_offset - len,
+                    data,
+                    is_last,
+                }))
+                .await
+            {
+                tracing::error!("Failed to send reassembled chunk: {}", e);
+                return Err(SteamVentError::Io(std::io::Error::other(
+                    "reassembly channel closed",
+                )));
+            }
         }
-
-        let file_handle = tokio::fs::File::create(&file_path).await?;
-
-        Ok(FileWriteState {
-            file_handle,
-            file_path,
-            next_offset: 0,
-            pending_chunks: BTreeMap::new(),
-            chunks_written: 0,
-            total_chunks: file.chunks.len(),
-            bytes_written: 0,
-        })
+        Ok(())
     }
 
     pub async fn start(
         self,
         mut decode_rx: tokio::sync::mpsc::Receiver<Result<DownloadedChunk>>,
-    ) -> Result<()> {
-        let mut file_states: HashMap<usize, FileWriteState> = HashMap::new();
+    ) {
+        let mut file_states: HashMap<usize, FileReassemblyState> = HashMap::new();
 
         while let Some(result) = decode_rx.recv().await {
             match result {
                 Ok(chunk) => {
+                    let file_index = chunk.file_index;
                     let data_len = chunk.data.len() as u64;
 
-                    // Lazily open the file on first chunk arrival.
-                    if !file_states.contains_key(&chunk.file_index) {
-                        let state = self.open_file_state(chunk.file_index).await?;
-                        file_states.insert(chunk.file_index, state);
-                    }
-                    let state = file_states
-                        .get_mut(&chunk.file_index)
-                        .expect("file state was just inserted");
+                    // Lazily initialise state on first chunk arrival.
+                    let state = file_states.entry(file_index).or_insert_with(|| {
+                        FileReassemblyState {
+                            next_offset: 0,
+                            pending_chunks: BTreeMap::new(),
+                            chunks_emitted: 0,
+                            total_chunks: self.files[file_index].chunks.len(),
+                        }
+                    });
 
                     if chunk.chunk_offset == state.next_offset {
-                        // This chunk is the next expected one — write immediately.
-                        state.file_handle.write_all(&chunk.data).await?;
-                        state.next_offset += chunk.data.len() as u64;
-                        state.bytes_written += chunk.data.len() as u64;
-                        state.chunks_written += 1;
+                        // This chunk is the next expected one — emit immediately.
+                        state.next_offset += data_len;
+                        state.chunks_emitted += 1;
+                        let is_last = state.is_complete();
+                        self.progress.on_write_progress(data_len);
+                        if let Err(e) = self
+                            .reassembly_tx
+                            .send(Ok(ReassembledChunk {
+                                file_index,
+                                offset: chunk.chunk_offset,
+                                data: chunk.data,
+                                is_last,
+                            }))
+                            .await
+                        {
+                            tracing::error!("Failed to send reassembled chunk: {}", e);
+                            return;
+                        }
 
                         // Flush any subsequent pending chunks that are now contiguous.
-                        state.flush_pending().await?;
+                        if let Err(e) = Self::flush_pending(
+                            state,
+                            file_index,
+                            &self.reassembly_tx,
+                            self.progress.as_ref(),
+                        )
+                        .await
+                        {
+                            tracing::error!("Flush pending failed: {}", e);
+                            return;
+                        }
                     } else {
                         // Out-of-order chunk — buffer it.
-                        state
-                            .pending_chunks
-                            .insert(chunk.chunk_offset, chunk.data);
+                        state.pending_chunks.insert(chunk.chunk_offset, chunk.data);
                     }
 
-                    self.progress.on_write_progress(data_len);
-
-                    if state.is_complete() {
-                        state.file_handle.flush().await?;
-                        let bytes = state.bytes_written as usize;
-                        let path = state.file_path.clone();
-                        file_states.remove(&chunk.file_index);
-                        self.progress.on_file_complete(&path, bytes);
+                    // Remove completed file state to free memory.
+                    if file_states
+                        .get(&file_index)
+                        .map_or(false, |s| s.is_complete())
+                    {
+                        file_states.remove(&file_index);
                     }
                 }
                 Err(e) => {
-                    // Clean up any partially written files before returning.
-                    for (_, state) in file_states.into_iter() {
-                        drop(state.file_handle);
-                        if let Err(rm_err) = tokio::fs::remove_file(&state.file_path).await {
-                            tracing::warn!(
-                                "Failed to remove incomplete file {}: {}",
-                                state.file_path.display(),
-                                rm_err
-                            );
-                        }
-                    }
                     tracing::error!("Error in decode stream: {}", e);
-                    return Err(e);
+                    let _ = self.reassembly_tx.send(Err(e)).await;
+                    return;
                 }
             }
         }
 
         // Channel closed — check for any files that didn't receive all chunks.
         if !file_states.is_empty() {
-            let mut incomplete_files = Vec::new();
-            for (file_index, state) in file_states.into_iter() {
-                let filename = self.files[file_index].filename.clone();
+            for (file_index, state) in &file_states {
+                let filename = &self.files[*file_index].filename;
+                let received = state.chunks_emitted + state.pending_chunks.len();
                 tracing::warn!(
                     "Incomplete file '{}': received {}/{} chunks",
                     filename,
-                    state.chunks_written + state.pending_chunks.len(),
+                    received,
                     state.total_chunks
                 );
-                drop(state.file_handle);
-                if let Err(rm_err) = tokio::fs::remove_file(&state.file_path).await {
-                    tracing::warn!(
-                        "Failed to remove incomplete file {}: {}",
-                        state.file_path.display(),
-                        rm_err
-                    );
-                }
-                incomplete_files.push((filename, state.chunks_written + state.pending_chunks.len(), state.total_chunks));
             }
 
-            let (filename, received, total) = incomplete_files.into_iter().next().unwrap();
-            return Err(SteamVentError::Cdn(
-                crate::error::CdnError::IncompleteDownload {
-                    filename,
-                    received,
-                    total,
-                },
-            ));
+            let (file_index, state) = file_states.into_iter().next().unwrap();
+            let filename = self.files[file_index].filename.clone();
+            let received = state.chunks_emitted + state.pending_chunks.len();
+            let _ = self
+                .reassembly_tx
+                .send(Err(SteamVentError::Cdn(
+                    crate::error::CdnError::IncompleteDownload {
+                        filename,
+                        received,
+                        total: state.total_chunks,
+                    },
+                )))
+                .await;
         }
-
-        Ok(())
     }
 }

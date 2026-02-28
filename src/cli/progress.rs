@@ -1,5 +1,4 @@
 use indicatif::MultiProgress;
-use std::path::Path;
 use std::time::Instant;
 use steam_vent_cdn::{DownloadItem, ProgressCallback};
 
@@ -105,10 +104,6 @@ impl ProgressManager {
         self.pb_write.inc(bytes);
     }
 
-    pub fn file_complete(&self, path: &Path, bytes: usize) {
-        tracing::info!("Completed file: {} ({} bytes)", path.display(), bytes);
-    }
-
     pub fn finish(&self) {
         let elapsed = self.start_time.elapsed();
         tracing::info!("Total time: {:.2}s", elapsed.as_secs_f64());
@@ -129,9 +124,5 @@ impl ProgressCallback for ProgressManager {
 
     fn on_write_progress(&self, bytes: u64) {
         self.increment_write(bytes);
-    }
-
-    fn on_file_complete(&self, path: &Path, bytes: usize) {
-        self.file_complete(path, bytes);
     }
 }

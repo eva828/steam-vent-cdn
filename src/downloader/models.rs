@@ -1,5 +1,6 @@
-use std::path::Path;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use crate::error::{ManifestError, Result, SteamVentError};
 use steam_vent_proto::content_manifest::ContentManifestPayload;
@@ -8,7 +9,6 @@ pub trait ProgressCallback: Send + Sync {
     fn on_download_progress(&self, bytes: u64);
     fn on_decode_progress(&self, bytes: u64);
     fn on_write_progress(&self, bytes: u64);
-    fn on_file_complete(&self, path: &Path, bytes: usize);
 }
 
 #[derive(Debug, Clone)]
@@ -137,4 +137,53 @@ pub struct VersionInfo {
     pub timestamp: u32,
     pub manifest_id: u64,
     pub description: String,
+}
+
+/// A chunk that has been downloaded, decoded, and reassembled in the correct
+/// order within its file. Consumers receive these in sequential offset order
+/// per file, so they can be written (or streamed) directly without buffering.
+#[derive(Debug)]
+pub struct ReassembledChunk {
+    /// Index into the original `DownloadItem` slice.
+    pub file_index: usize,
+    /// Byte offset within the file.
+    pub offset: u64,
+    /// Decoded (decrypted + decompressed) data for this chunk.
+    pub data: Vec<u8>,
+    /// `true` when this is the last chunk of the file.
+    pub is_last: bool,
+}
+
+/// A stream of [`ReassembledChunk`]s produced by [`CdnDownloader::download`].
+///
+/// Implements [`futures::Stream`] so it can be used with standard stream
+/// combinators (`next()`, `map()`, `for_each()`, etc.).
+///
+/// Chunks arrive in sequential offset order per file. The consumer is
+/// responsible for routing each chunk to the appropriate output (file, network
+/// stream, etc.).
+pub struct DownloadStream {
+    rx: tokio::sync::mpsc::Receiver<Result<ReassembledChunk>>,
+    /// Worker handles — kept alive so they are aborted on drop.
+    _handles: tokio::task::JoinSet<()>,
+}
+
+impl DownloadStream {
+    pub(crate) fn new(
+        rx: tokio::sync::mpsc::Receiver<Result<ReassembledChunk>>,
+        handles: tokio::task::JoinSet<()>,
+    ) -> Self {
+        Self {
+            rx,
+            _handles: handles,
+        }
+    }
+}
+
+impl futures::Stream for DownloadStream {
+    type Item = Result<ReassembledChunk>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.rx.poll_recv(cx)
+    }
 }

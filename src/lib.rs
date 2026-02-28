@@ -10,6 +10,6 @@ pub use config::{Config, ConfigBuilder, Credentials, RetryPolicy};
 pub use connection::{SteamClient, SteamSession};
 pub use downloader::{
     CdnDownloader, ChunkDownloadTask, ChunkInfo, CompressedChunk, DepotContext, DownloadItem,
-    DownloadedChunk, ProgressCallback, VersionInfo,
+    DownloadStream, DownloadedChunk, ProgressCallback, ReassembledChunk, VersionInfo,
 };
 pub use error::{ChunkError, ManifestError, Result, SteamVentError, WorkshopError};

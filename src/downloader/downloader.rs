@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::sync::Arc;
 
 use crate::connection::{ConnectionExt, SteamSession};
@@ -18,9 +17,9 @@ use super::http::HttpFetcher;
 
 use super::models::{
     ChunkDownloadTask, CompressedChunk, DepotContext, DownloadItem, DownloadManifest,
-    DownloadedChunk, ProgressCallback, VersionInfo,
+    DownloadStream, DownloadedChunk, ProgressCallback, VersionInfo,
 };
-use super::workers::{DecodeWorker, DownloadWorker, WriteWorker};
+use super::workers::{DecodeWorker, DownloadWorker, ReassemblyWorker};
 
 /// Metadata for a single CDN server, used for intelligent server selection.
 #[derive(Debug, Clone)]
@@ -367,12 +366,17 @@ impl CdnDownloader {
         manifest_data.into_download_items()
     }
 
-    pub async fn download_to_directory(
+    /// Start downloading chunks and return a [`DownloadStream`] that yields
+    /// [`ReassembledChunk`](super::models::ReassembledChunk)s in sequential
+    /// offset order per file.
+    ///
+    /// The caller is responsible for consuming the stream and writing the data
+    /// to the appropriate destination (file, network, etc.).
+    pub async fn download(
         &mut self,
         files: &[DownloadItem],
-        base_path: &Path,
         progress: Arc<dyn ProgressCallback>,
-    ) -> Result<()> {
+    ) -> Result<DownloadStream> {
         let mut tasks: Vec<ChunkDownloadTask> = Vec::new();
         for (file_index, file) in files.iter().enumerate() {
             let depot = Arc::clone(&file.depot);
@@ -404,11 +408,15 @@ impl CdnDownloader {
             }
         };
         let decode_channel_size = (logical_cores * 2).max(32);
+        let reassembly_channel_size = decode_channel_size;
 
         let (download_tx, download_rx) =
             tokio::sync::mpsc::channel::<Result<CompressedChunk>>(download_channel_size);
         let (decode_tx, decode_rx) =
             tokio::sync::mpsc::channel::<Result<DownloadedChunk>>(decode_channel_size);
+        let (reassembly_tx, reassembly_rx) = tokio::sync::mpsc::channel::<
+            Result<super::models::ReassembledChunk>,
+        >(reassembly_channel_size);
 
         let download_worker = DownloadWorker::new(
             self.http_fetcher.clone(),
@@ -419,33 +427,27 @@ impl CdnDownloader {
 
         let decode_worker = DecodeWorker::new(decode_tx, progress.clone());
 
-        let write_worker = WriteWorker::new(
-            base_path.to_path_buf(),
+        let reassembly_worker = ReassemblyWorker::new(
+            reassembly_tx,
             progress.clone(),
             Arc::new(files.to_vec()),
         );
 
-        // Start workers
+        let mut handles = tokio::task::JoinSet::new();
+
+        // Start download workers (spawns internal tasks, returns immediately)
         download_worker.start(tasks).await;
 
-        let decode_handle = tokio::spawn(async move {
+        // Spawn decode worker
+        handles.spawn(async move {
             decode_worker.start(download_rx).await;
         });
 
-        // The write worker runs in the current task
-        let write_result = write_worker.start(decode_rx).await;
+        // Spawn reassembly worker
+        handles.spawn(async move {
+            reassembly_worker.start(decode_rx).await;
+        });
 
-        match decode_handle.await {
-            Ok(()) => {}
-            Err(e) => {
-                tracing::error!("Decode worker panicked: {}", e);
-                return Err(SteamVentError::Io(std::io::Error::other(format!(
-                    "Decode worker panicked: {}",
-                    e
-                ))));
-            }
-        }
-
-        write_result
+        Ok(DownloadStream::new(reassembly_rx, handles))
     }
 }

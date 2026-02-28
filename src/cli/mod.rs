@@ -1,6 +1,7 @@
 pub mod args;
 pub mod progress;
 pub mod ui;
+mod writer;
 
 pub use args::Args;
 use indicatif::MultiProgress;
@@ -199,9 +200,11 @@ pub async fn run_download_pipeline(
     let progress = ProgressManager::new(multi, &files);
     let progress = Arc::new(progress);
 
-    downloader
-        .download_to_directory(&files, &base_path, progress.clone())
+    let mut stream = downloader
+        .download(&files, progress.clone())
         .await?;
+
+    writer::write_stream_to_directory(&mut stream, &files, &base_path).await?;
 
     progress.finish();
     Ok(())
