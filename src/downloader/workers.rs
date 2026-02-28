@@ -73,6 +73,7 @@ impl DownloadWorker {
                                 depot: task.depot,
                                 file_index: task.file_index,
                                 chunk_index: task.chunk_index,
+                                chunk_offset: task.chunk_offset,
                                 compressed_data: data,
                                 uncompressed_size: task.uncompressed_size,
                                 crc: task.crc,
@@ -136,6 +137,7 @@ impl DecodeWorker {
                                 if let Err(e) = decode_tx.blocking_send(Ok(DownloadedChunk {
                                     file_index: compressed.file_index,
                                     chunk_index: compressed.chunk_index,
+                                    chunk_offset: compressed.chunk_offset,
                                     data,
                                 })) {
                                     tracing::error!("Failed to send decoded chunk: {}", e);
@@ -182,27 +184,53 @@ impl WriteWorker {
         self,
         mut decode_rx: tokio::sync::mpsc::Receiver<Result<DownloadedChunk>>,
     ) -> Result<()> {
-        let mut chunk_buffers: HashMap<usize, Vec<(usize, Vec<u8>)>> = HashMap::new();
+        // Map from file_index to Vec of (offset, data)
+        let mut chunk_buffers: HashMap<usize, Vec<(u64, Vec<u8>)>> = HashMap::new();
 
         while let Some(result) = decode_rx.recv().await {
             match result {
                 Ok(chunk) => {
                     let buffers = chunk_buffers.entry(chunk.file_index).or_default();
-                    buffers.push((chunk.chunk_index, chunk.data));
+                    buffers.push((chunk.chunk_offset, chunk.data));
 
                     let file = &self.files[chunk.file_index];
                     let total_chunks = file.chunks.len();
 
                     if buffers.len() == total_chunks {
                         let file_path = self.base_path.join(&file.filename);
-                        let mut file_data: Vec<(usize, Vec<u8>)> = chunk_buffers
+                        let mut file_data: Vec<(u64, Vec<u8>)> = chunk_buffers
                             .remove(&chunk.file_index)
                             .expect("Failed to remove file data from chunk_buffers: this should not happen since we just verified buffers.len() == total_chunks");
-                        file_data.sort_by_key(|(idx, _)| *idx);
+                        
+                        // Sort by offset to ensure correct order
+                        file_data.sort_by_key(|(offset, _)| *offset);
 
-                        let mut full_data = Vec::new();
-                        for (_, data) in file_data {
-                            full_data.extend(data);
+                        // Calculate total file size
+                        let total_size = file.size.unwrap_or_else(|| {
+                            file_data
+                                .iter()
+                                .map(|(offset, data)| offset + data.len() as u64)
+                                .max()
+                                .unwrap_or(0)
+                        });
+
+                        // Create buffer initialized with zeros
+                        let mut full_data = vec![0u8; total_size as usize];
+
+                        // Write each chunk at its offset
+                        for (offset, data) in file_data {
+                            let start = offset as usize;
+                            let end = start + data.len();
+                            if end <= full_data.len() {
+                                full_data[start..end].copy_from_slice(&data);
+                            } else {
+                                tracing::warn!(
+                                    "Chunk offset {} + size {} exceeds file size {}",
+                                    offset,
+                                    data.len(),
+                                    total_size
+                                );
+                            }
                         }
 
                         if let Some(p) = file_path.parent() {
@@ -223,11 +251,34 @@ impl WriteWorker {
             if !file_data.is_empty() {
                 let file = &self.files[file_index];
                 let file_path = self.base_path.join(&file.filename);
-                file_data.sort_by_key(|(idx, _)| *idx);
+                
+                // Sort by offset to ensure correct order
+                file_data.sort_by_key(|(offset, _)| *offset);
 
-                let mut full_data = Vec::new();
-                for (_, data) in file_data {
-                    full_data.extend(data);
+                // Calculate total file size
+                let total_size = file.size.unwrap_or_else(|| {
+                    file_data.iter().fold(0u64, |max, (offset, data)| {
+                        (*offset + data.len() as u64).max(max)
+                    })
+                });
+
+                // Create buffer initialized with zeros
+                let mut full_data = vec![0u8; total_size as usize];
+
+                // Write each chunk at its offset
+                for (offset, data) in file_data {
+                    let start = offset as usize;
+                    let end = start + data.len();
+                    if end <= full_data.len() {
+                        full_data[start..end].copy_from_slice(&data);
+                    } else {
+                        tracing::warn!(
+                            "Chunk offset {} + size {} exceeds file size {}",
+                            offset,
+                            data.len(),
+                            total_size
+                        );
+                    }
                 }
 
                 if let Some(p) = file_path.parent() {

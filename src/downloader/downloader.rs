@@ -382,6 +382,7 @@ impl CdnDownloader {
                     depot: Arc::clone(&depot),
                     file_index,
                     chunk_index,
+                    chunk_offset: chunk.offset,
                     compressed_size: chunk.compressed_size,
                     uncompressed_size: chunk.uncompressed_size,
                     crc: chunk.crc,

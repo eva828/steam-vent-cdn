@@ -17,6 +17,7 @@ pub struct ChunkDownloadTask {
     pub depot: Arc<DepotContext>,
     pub file_index: usize,
     pub chunk_index: usize,
+    pub chunk_offset: u64,
     pub compressed_size: u32,
     pub uncompressed_size: u32,
     pub crc: u32,
@@ -27,6 +28,7 @@ pub struct CompressedChunk {
     pub depot: Arc<DepotContext>,
     pub file_index: usize,
     pub chunk_index: usize,
+    pub chunk_offset: u64,
     pub compressed_data: Vec<u8>,
     pub uncompressed_size: u32,
     pub crc: u32,
@@ -36,6 +38,7 @@ pub struct CompressedChunk {
 pub struct DownloadedChunk {
     pub file_index: usize,
     pub chunk_index: usize,
+    pub chunk_offset: u64,
     pub data: Vec<u8>,
 }
 
@@ -72,6 +75,10 @@ impl DownloadManifest {
                         SteamVentError::Manifest(ManifestError::MissingField("chunk.crc"))
                     })?;
 
+                    let offset = c.offset.take().ok_or_else(|| {
+                        SteamVentError::Manifest(ManifestError::MissingField("chunk.offset"))
+                    })?;
+
                     let uncompressed_size = c.cb_original.take().ok_or_else(|| {
                         SteamVentError::Manifest(ManifestError::MissingField("chunk.cb_original"))
                     })?;
@@ -83,6 +90,7 @@ impl DownloadManifest {
                     Ok(ChunkInfo {
                         sha,
                         crc,
+                        offset,
                         uncompressed_size,
                         compressed_size,
                     })
@@ -106,6 +114,7 @@ impl DownloadManifest {
 pub struct ChunkInfo {
     pub sha: Vec<u8>,
     pub crc: u32,
+    pub offset: u64,
     pub uncompressed_size: u32,
     pub compressed_size: u32,
 }
