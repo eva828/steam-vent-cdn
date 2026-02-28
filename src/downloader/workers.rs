@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::archive::SteamChunk;
@@ -6,407 +6,202 @@ use crate::error::{Result, SteamVentError};
 
 use super::http::HttpFetcher;
 
-use super::models::{
-    ChunkDownloadTask, CompressedChunk, DownloadItem, DownloadedChunk, FileEntry,
-    ProgressCallback, ReassembledChunk,
-};
+use super::models::{DecodedChunk, DownloadItem, ProgressCallback, RawChunk};
 
-pub struct DownloadWorker {
-    http_fetcher: HttpFetcher,
-    download_sem: Arc<tokio::sync::Semaphore>,
-    progress: Arc<dyn ProgressCallback>,
-    download_tx: tokio::sync::mpsc::Sender<Result<CompressedChunk>>,
+/// Spawn one tokio task per chunk to download it from CDN.
+///
+/// All spawned tasks share `download_sem` to limit the total number of
+/// concurrent HTTP requests.  The function returns immediately after
+/// spawning; the last task to finish will drop the final clone of
+/// `download_tx`, closing the channel.
+pub(crate) fn spawn_chunk_downloads(
+    http_fetcher: &HttpFetcher,
+    download_sem: &Arc<tokio::sync::Semaphore>,
+    progress: &Arc<dyn ProgressCallback>,
+    item: &DownloadItem,
+    download_tx: tokio::sync::mpsc::Sender<Result<RawChunk>>,
+) {
+    let server_hosts = &item.depot.server_hosts;
+    let depot_id = item.depot.depot_id;
+    let depot_key = item.depot.depot_key.clone();
+
+    for (i, chunk) in item.chunks.iter().enumerate() {
+        let download_sem = Arc::clone(download_sem);
+        let download_tx = download_tx.clone();
+        let http_fetcher = http_fetcher.clone();
+        let progress = Arc::clone(progress);
+
+        let chunk_id = hex::encode(&chunk.sha);
+        let chunk_offset = chunk.offset;
+        let compressed_size = chunk.compressed_size;
+        let uncompressed_size = chunk.uncompressed_size;
+        let crc = chunk.crc;
+        let depot_key = depot_key.clone();
+        let server_hosts = server_hosts.clone();
+
+        tokio::spawn(async move {
+            let _permit = match download_sem.acquire().await {
+                Ok(permit) => permit,
+                Err(_) => {
+                    let _ = download_tx
+                        .send(Err(SteamVentError::Cdn(
+                            crate::error::CdnError::SemaphoreClosed,
+                        )))
+                        .await;
+                    return;
+                }
+            };
+
+            let start_server = i % server_hosts.len().max(1);
+            let result = http_fetcher
+                .download_chunk(&server_hosts, depot_id, &chunk_id, start_server)
+                .await;
+
+            match result {
+                Ok(data) => {
+                    progress.on_download_progress(compressed_size as u64);
+                    let _ = download_tx
+                        .send(Ok(RawChunk {
+                            chunk_offset,
+                            compressed_data: data,
+                            uncompressed_size,
+                            crc,
+                            depot_key,
+                        }))
+                        .await;
+                }
+                Err(e) => {
+                    let _ = download_tx.send(Err(e)).await;
+                }
+            }
+        });
+    }
 }
 
-impl DownloadWorker {
-    pub fn new(
-        http_fetcher: HttpFetcher,
-        parallel_download: usize,
-        progress: Arc<dyn ProgressCallback>,
-        download_tx: tokio::sync::mpsc::Sender<Result<CompressedChunk>>,
-    ) -> Self {
-        Self {
-            http_fetcher,
-            download_sem: Arc::new(tokio::sync::Semaphore::new(parallel_download)),
-            progress,
-            download_tx,
+/// Receive downloaded [`RawChunk`]s, decrypt + decompress them on the rayon
+/// thread pool, and forward the results as [`DecodedChunk`]s.
+pub(crate) async fn run_decode_loop(
+    mut download_rx: tokio::sync::mpsc::Receiver<Result<RawChunk>>,
+    decoded_tx: tokio::sync::mpsc::Sender<Result<DecodedChunk>>,
+    progress: Arc<dyn ProgressCallback>,
+) {
+    while let Some(result) = download_rx.recv().await {
+        match result {
+            Ok(raw) => {
+                let decoded_tx = decoded_tx.clone();
+                let progress = progress.clone();
+
+                rayon::spawn(move || {
+                    let result = SteamChunk::new(raw.compressed_data)
+                        .decrypt(raw.depot_key.as_deref())
+                        .and_then(|chunk| {
+                            chunk.decompress_and_verify(raw.uncompressed_size, raw.crc)
+                        });
+
+                    match result {
+                        Ok(chunk) => {
+                            let data = chunk.into_vec();
+                            progress.on_decode_progress(data.len() as u64);
+                            if let Err(e) = decoded_tx.blocking_send(Ok(DecodedChunk {
+                                chunk_offset: raw.chunk_offset,
+                                data,
+                            })) {
+                                tracing::error!("Failed to send decoded chunk: {}", e);
+                            }
+                        }
+                        Err(e) => {
+                            if let Err(send_err) = decoded_tx.blocking_send(Err(e)) {
+                                tracing::error!("Failed to send decode error: {}", send_err);
+                            }
+                        }
+                    }
+                });
+            }
+            Err(e) => {
+                if let Err(send_err) = decoded_tx.send(Err(e)).await {
+                    tracing::error!("Failed to send decode stream error: {}", send_err);
+                }
+            }
         }
     }
+}
 
-    pub async fn start(self, tasks: Vec<ChunkDownloadTask>) {
-        let download_tx = self.download_tx;
+/// Receive decoded (but potentially out-of-order) [`DecodedChunk`]s and
+/// re-emit their data in sequential offset order as `Vec<u8>` directly to
+/// the output channel.
+///
+/// Uses a [`BTreeMap`] to buffer out-of-order chunks and flushes them as
+/// soon as they become contiguous.
+pub(crate) async fn run_reassembly_loop(
+    mut decoded_rx: tokio::sync::mpsc::Receiver<Result<DecodedChunk>>,
+    output_tx: tokio::sync::mpsc::Sender<Result<Vec<u8>>>,
+    progress: Arc<dyn ProgressCallback>,
+    filename: String,
+    total_chunks: usize,
+) {
+    let mut next_offset: u64 = 0;
+    let mut pending: BTreeMap<u64, Vec<u8>> = BTreeMap::new();
+    let mut chunks_emitted: usize = 0;
 
-        for (task_index, task) in tasks.into_iter().enumerate() {
-            let download_sem = self.download_sem.clone();
-            let download_tx = download_tx.clone();
-            let http_fetcher = self.http_fetcher.clone();
-            let progress = self.progress.clone();
-
-            tokio::spawn(async move {
-                let _permit = match download_sem.acquire().await {
-                    Ok(permit) => permit,
-                    Err(_) => {
-                        // Semaphore closed - send error to channel
-                        let _ = download_tx
-                            .send(Err(SteamVentError::Cdn(
-                                crate::error::CdnError::SemaphoreClosed,
-                            )))
-                            .await;
+    while let Some(result) = decoded_rx.recv().await {
+        match result {
+            Ok(chunk) => {
+                if chunk.chunk_offset == next_offset {
+                    // This chunk is the next expected one — emit immediately.
+                    let len = chunk.data.len() as u64;
+                    next_offset += len;
+                    chunks_emitted += 1;
+                    progress.on_write_progress(len);
+                    if output_tx.send(Ok(chunk.data)).await.is_err() {
+                        tracing::error!("Output channel closed during reassembly");
                         return;
                     }
-                };
-                let start_server = task_index % task.depot.server_hosts.len().max(1);
-                let compressed_data = http_fetcher
-                    .download_chunk(
-                        &task.depot.server_hosts,
-                        task.depot.depot_id,
-                        &task.chunk_id,
-                        start_server,
-                    )
-                    .await;
 
-                match compressed_data {
-                    Ok(data) => {
-                        progress.on_download_progress(task.compressed_size as u64);
-                        // Ignore send error (receiver dropped is normal shutdown)
-                        let _ = download_tx
-                            .send(Ok(CompressedChunk {
-                                depot: task.depot,
-                                file_index: task.file_index,
-                                chunk_index: task.chunk_index,
-                                chunk_offset: task.chunk_offset,
-                                compressed_data: data,
-                                uncompressed_size: task.uncompressed_size,
-                                crc: task.crc,
-                            }))
-                            .await;
-                    }
-                    Err(e) => {
-                        // Ignore send error (receiver dropped is normal shutdown)
-                        let _ = download_tx.send(Err(e)).await;
-                    }
-                }
-            });
-        }
-    }
-}
-
-pub struct DecodeWorker {
-    decode_tx: tokio::sync::mpsc::Sender<Result<DownloadedChunk>>,
-    progress: Arc<dyn ProgressCallback>,
-}
-
-impl DecodeWorker {
-    pub fn new(
-        decode_tx: tokio::sync::mpsc::Sender<Result<DownloadedChunk>>,
-        progress: Arc<dyn ProgressCallback>,
-    ) -> Self {
-        Self {
-            decode_tx,
-            progress,
-        }
-    }
-
-    pub async fn start(
-        self,
-        mut download_rx: tokio::sync::mpsc::Receiver<Result<CompressedChunk>>,
-    ) {
-        let decode_tx = self.decode_tx;
-
-        while let Some(result) = download_rx.recv().await {
-            match result {
-                Ok(compressed) => {
-                    let decode_tx = decode_tx.clone();
-                    let progress = self.progress.clone();
-
-                    rayon::spawn(move || {
-                        let depot_key = compressed.depot.depot_key.clone();
-                        let compressed_data = compressed.compressed_data;
-                        let uncompressed_size = compressed.uncompressed_size;
-                        let crc = compressed.crc;
-
-                        let result = SteamChunk::new(compressed_data)
-                            .decrypt(depot_key.as_deref())
-                            .and_then(|chunk| chunk.decompress_and_verify(uncompressed_size, crc));
-
-                        match result {
-                            Ok(chunk) => {
-                                let data = chunk.into_vec();
-                                let len = data.len() as u64;
-                                progress.on_decode_progress(len);
-                                if let Err(e) = decode_tx.blocking_send(Ok(DownloadedChunk {
-                                    file_index: compressed.file_index,
-                                    chunk_index: compressed.chunk_index,
-                                    chunk_offset: compressed.chunk_offset,
-                                    data,
-                                })) {
-                                    tracing::error!("Failed to send decoded chunk: {}", e);
-                                }
-                            }
-                            Err(e) => {
-                                if let Err(send_err) = decode_tx.blocking_send(Err(e)) {
-                                    tracing::error!("Failed to send decode error: {}", send_err);
-                                }
-                            }
+                    // Flush any subsequent pending chunks that are now contiguous.
+                    while let Some(entry) = pending.first_entry() {
+                        if *entry.key() != next_offset {
+                            break;
                         }
-                    });
-                }
-                Err(e) => {
-                    if let Err(send_err) = decode_tx.send(Err(e)).await {
-                        tracing::error!("Failed to send decode stream error: {}", send_err);
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Tracks the reassembly state for a single file's chunks.
-struct FileReassemblyState {
-    /// Next byte offset we expect to emit (i.e., current end of contiguous region).
-    next_offset: u64,
-    /// Chunks that arrived out of order, keyed by their byte offset.
-    pending_chunks: BTreeMap<u64, Vec<u8>>,
-    /// Number of chunks already emitted.
-    chunks_emitted: usize,
-    /// Total number of chunks expected for this file.
-    total_chunks: usize,
-}
-
-impl FileReassemblyState {
-    fn is_complete(&self) -> bool {
-        self.chunks_emitted == self.total_chunks
-    }
-}
-
-/// Receives decoded (but potentially out-of-order) chunks and re-emits them
-/// in sequential offset order per file as [`ReassembledChunk`]s.
-///
-/// This worker does **no** file I/O — it only buffers and reorders.
-pub(crate) struct ReassemblyWorker {
-    reassembly_tx: tokio::sync::mpsc::Sender<Result<ReassembledChunk>>,
-    progress: Arc<dyn ProgressCallback>,
-    files: Arc<Vec<DownloadItem>>,
-}
-
-impl ReassemblyWorker {
-    pub fn new(
-        reassembly_tx: tokio::sync::mpsc::Sender<Result<ReassembledChunk>>,
-        progress: Arc<dyn ProgressCallback>,
-        files: Arc<Vec<DownloadItem>>,
-    ) -> Self {
-        Self {
-            reassembly_tx,
-            progress,
-            files,
-        }
-    }
-
-    /// Flush any pending chunks that are contiguous from `next_offset` and
-    /// send them as `ReassembledChunk`s.
-    async fn flush_pending(
-        state: &mut FileReassemblyState,
-        file_index: usize,
-        tx: &tokio::sync::mpsc::Sender<Result<ReassembledChunk>>,
-        progress: &dyn ProgressCallback,
-    ) -> Result<()> {
-        while let Some(entry) = state.pending_chunks.first_entry() {
-            if *entry.key() != state.next_offset {
-                break;
-            }
-            let data = entry.remove();
-            let len = data.len() as u64;
-            state.next_offset += len;
-            state.chunks_emitted += 1;
-            let is_last = state.is_complete();
-            progress.on_write_progress(len);
-            if let Err(e) = tx
-                .send(Ok(ReassembledChunk {
-                    file_index,
-                    data,
-                    is_last,
-                }))
-                .await
-            {
-                tracing::error!("Failed to send reassembled chunk: {}", e);
-                return Err(SteamVentError::Io(std::io::Error::other(
-                    "reassembly channel closed",
-                )));
-            }
-        }
-        Ok(())
-    }
-
-    pub async fn start(
-        self,
-        mut decode_rx: tokio::sync::mpsc::Receiver<Result<DownloadedChunk>>,
-    ) {
-        let mut file_states: HashMap<usize, FileReassemblyState> = HashMap::new();
-
-        while let Some(result) = decode_rx.recv().await {
-            match result {
-                Ok(chunk) => {
-                    let file_index = chunk.file_index;
-                    let data_len = chunk.data.len() as u64;
-
-                    // Lazily initialise state on first chunk arrival.
-                    let state = file_states.entry(file_index).or_insert_with(|| {
-                        FileReassemblyState {
-                            next_offset: 0,
-                            pending_chunks: BTreeMap::new(),
-                            chunks_emitted: 0,
-                            total_chunks: self.files[file_index].chunks.len(),
-                        }
-                    });
-
-                    if chunk.chunk_offset == state.next_offset {
-                        // This chunk is the next expected one — emit immediately.
-                        state.next_offset += data_len;
-                        state.chunks_emitted += 1;
-                        let is_last = state.is_complete();
-                        self.progress.on_write_progress(data_len);
-                        if let Err(e) = self
-                            .reassembly_tx
-                            .send(Ok(ReassembledChunk {
-                                file_index,
-                                data: chunk.data,
-                                is_last,
-                            }))
-                            .await
-                        {
-                            tracing::error!("Failed to send reassembled chunk: {}", e);
+                        let data = entry.remove();
+                        let len = data.len() as u64;
+                        next_offset += len;
+                        chunks_emitted += 1;
+                        progress.on_write_progress(len);
+                        if output_tx.send(Ok(data)).await.is_err() {
+                            tracing::error!("Output channel closed during reassembly flush");
                             return;
                         }
-
-                        // Flush any subsequent pending chunks that are now contiguous.
-                        if let Err(e) = Self::flush_pending(
-                            state,
-                            file_index,
-                            &self.reassembly_tx,
-                            self.progress.as_ref(),
-                        )
-                        .await
-                        {
-                            tracing::error!("Flush pending failed: {}", e);
-                            return;
-                        }
-                    } else {
-                        // Out-of-order chunk — buffer it.
-                        state.pending_chunks.insert(chunk.chunk_offset, chunk.data);
                     }
-
-                    // Remove completed file state to free memory.
-                    if file_states
-                        .get(&file_index)
-                        .map_or(false, |s| s.is_complete())
-                    {
-                        file_states.remove(&file_index);
-                    }
-                }
-                Err(e) => {
-                    tracing::error!("Error in decode stream: {}", e);
-                    let _ = self.reassembly_tx.send(Err(e)).await;
-                    return;
+                } else {
+                    // Out-of-order chunk — buffer it.
+                    pending.insert(chunk.chunk_offset, chunk.data);
                 }
             }
+            Err(e) => {
+                tracing::error!("Error in decode stream: {}", e);
+                let _ = output_tx.send(Err(e)).await;
+                return;
+            }
         }
+    }
 
-        // Channel closed — check for any files that didn't receive all chunks.
-        if !file_states.is_empty() {
-            for (file_index, state) in &file_states {
-                let filename = &self.files[*file_index].filename;
-                let received = state.chunks_emitted + state.pending_chunks.len();
-                tracing::warn!(
-                    "Incomplete file '{}': received {}/{} chunks",
+    // Channel closed — check for incomplete file.
+    if chunks_emitted < total_chunks {
+        let received = chunks_emitted + pending.len();
+        tracing::warn!(
+            "Incomplete file '{}': received {}/{} chunks",
+            filename,
+            received,
+            total_chunks,
+        );
+        let _ = output_tx
+            .send(Err(SteamVentError::Cdn(
+                crate::error::CdnError::IncompleteDownload {
                     filename,
                     received,
-                    state.total_chunks
-                );
-            }
-
-            let (file_index, state) = file_states.into_iter().next().unwrap();
-            let filename = self.files[file_index].filename.clone();
-            let received = state.chunks_emitted + state.pending_chunks.len();
-            let _ = self
-                .reassembly_tx
-                .send(Err(SteamVentError::Cdn(
-                    crate::error::CdnError::IncompleteDownload {
-                        filename,
-                        received,
-                        total: state.total_chunks,
-                    },
-                )))
-                .await;
-        }
-    }
-}
-
-/// Demultiplexes a single stream of [`ReassembledChunk`]s into per-file
-/// [`FileEntry`] byte streams.
-///
-/// For each new file encountered, a `FileEntry` (containing a byte-stream
-/// receiver) is sent to the outer stream.  Subsequent chunks for that file
-/// are forwarded to the per-file channel.
-pub(crate) struct DemuxWorker {
-    file_tx: tokio::sync::mpsc::Sender<crate::error::Result<FileEntry>>,
-    files: Arc<Vec<DownloadItem>>,
-}
-
-impl DemuxWorker {
-    pub fn new(
-        file_tx: tokio::sync::mpsc::Sender<crate::error::Result<FileEntry>>,
-        files: Arc<Vec<DownloadItem>>,
-    ) -> Self {
-        Self { file_tx, files }
-    }
-
-    pub async fn start(
-        self,
-        mut reassembly_rx: tokio::sync::mpsc::Receiver<Result<ReassembledChunk>>,
-    ) {
-        let mut file_channels: HashMap<
-            usize,
-            tokio::sync::mpsc::Sender<crate::error::Result<Vec<u8>>>,
-        > = HashMap::new();
-
-        while let Some(result) = reassembly_rx.recv().await {
-            match result {
-                Ok(chunk) => {
-                    let file_index = chunk.file_index;
-
-                    // Create per-file channel and FileEntry on first chunk.
-                    if !file_channels.contains_key(&file_index) {
-                        let (tx, rx) = tokio::sync::mpsc::channel(8);
-                        let file = &self.files[file_index];
-                        let entry = FileEntry::new(
-                            file.filename.clone(),
-                            file.size,
-                            rx,
-                        );
-                        if self.file_tx.send(Ok(entry)).await.is_err() {
-                            return; // consumer dropped
-                        }
-                        file_channels.insert(file_index, tx);
-                    }
-
-                    let is_last = chunk.is_last;
-                    if let Some(tx) = file_channels.get(&file_index) {
-                        if tx.send(Ok(chunk.data)).await.is_err() {
-                            tracing::warn!("Per-file channel closed for file {}", file_index);
-                        }
-                    }
-
-                    if is_last {
-                        // Drop the sender so the FileEntry stream ends.
-                        file_channels.remove(&file_index);
-                    }
-                }
-                Err(e) => {
-                    // Forward error to outer stream.
-                    let _ = self.file_tx.send(Err(e)).await;
-                    return;
-                }
-            }
-        }
+                    total: total_chunks,
+                },
+            )))
+            .await;
     }
 }

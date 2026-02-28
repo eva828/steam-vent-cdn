@@ -16,10 +16,10 @@ use steam_vent_proto::steammessages_publishedfile_steamclient::{
 use super::http::HttpFetcher;
 
 use super::models::{
-    ChunkDownloadTask, CompressedChunk, DepotContext, DownloadItem, DownloadManifest,
-    DownloadStream, DownloadedChunk, ProgressCallback, VersionInfo,
+    DepotContext, DownloadItem, DownloadManifest, DownloadPipeline, FileByteStream,
+    ProgressCallback, RawChunk, DecodedChunk, VersionInfo,
 };
-use super::workers::{DecodeWorker, DemuxWorker, DownloadWorker, ReassemblyWorker};
+use super::workers;
 
 /// Metadata for a single CDN server, used for intelligent server selection.
 #[derive(Debug, Clone)]
@@ -366,37 +366,37 @@ impl CdnDownloader {
         manifest_data.into_download_items()
     }
 
-    /// Start downloading chunks and return a [`DownloadStream`] that yields
-    /// one [`FileEntry`](super::models::FileEntry) per file.  Each
-    /// `FileEntry` is a `futures::Stream<Item = Result<Vec<u8>>>` providing
-    /// the file's bytes in order.
+    /// Create a [`DownloadPipeline`] that can download individual files.
     ///
-    /// **Important:** `FileEntry`s should be consumed concurrently (e.g. by
-    /// spawning a task per entry) to avoid deadlocks caused by interleaved
-    /// CDN chunks.
-    pub async fn download(
-        &mut self,
-        files: &[DownloadItem],
+    /// The pipeline shares a download semaphore so the total number of
+    /// concurrent HTTP chunk downloads is bounded by `parallel_download`
+    /// across all `download_file` calls.
+    pub fn create_pipeline(
+        &self,
         progress: Arc<dyn ProgressCallback>,
-    ) -> Result<DownloadStream> {
-        let mut tasks: Vec<ChunkDownloadTask> = Vec::new();
-        for (file_index, file) in files.iter().enumerate() {
-            let depot = Arc::clone(&file.depot);
-            for (chunk_index, chunk) in file.chunks.iter().enumerate() {
-                tasks.push(ChunkDownloadTask {
-                    chunk_id: hex::encode(&chunk.sha),
-                    depot: Arc::clone(&depot),
-                    file_index,
-                    chunk_index,
-                    chunk_offset: chunk.offset,
-                    compressed_size: chunk.compressed_size,
-                    uncompressed_size: chunk.uncompressed_size,
-                    crc: chunk.crc,
-                });
-            }
-        }
-
+    ) -> DownloadPipeline {
         let parallel_download = self.steam_client.config().parallel_download;
+        DownloadPipeline {
+            http_fetcher: self.http_fetcher.clone(),
+            download_sem: Arc::new(tokio::sync::Semaphore::new(parallel_download)),
+            progress,
+            parallel_download,
+        }
+    }
+}
+
+impl DownloadPipeline {
+    /// Download a single file and return a [`FileByteStream`] providing its
+    /// bytes in sequential order.
+    ///
+    /// Internally spawns a 3-stage pipeline (download → decode → reassemble)
+    /// dedicated to this file.  The returned stream owns all worker tasks;
+    /// dropping it aborts them.
+    ///
+    /// Multiple `download_file` calls share the same download semaphore, so
+    /// the total concurrent HTTP chunk downloads stays bounded.
+    pub fn download_file(&self, item: &DownloadItem) -> Result<FileByteStream> {
+        let parallel_download = self.parallel_download;
 
         let download_channel_size = (parallel_download * 2).max(64);
         let logical_cores = match std::thread::available_parallelism() {
@@ -410,59 +410,55 @@ impl CdnDownloader {
             }
         };
         let decode_channel_size = (logical_cores * 2).max(32);
-        let reassembly_channel_size = decode_channel_size;
-        let file_channel_size = files.len().max(8);
+        let output_channel_size = decode_channel_size;
 
+        // Stage 1 → 2: raw (encrypted+compressed) chunks
         let (download_tx, download_rx) =
-            tokio::sync::mpsc::channel::<Result<CompressedChunk>>(download_channel_size);
-        let (decode_tx, decode_rx) =
-            tokio::sync::mpsc::channel::<Result<DownloadedChunk>>(decode_channel_size);
-        let (reassembly_tx, reassembly_rx) = tokio::sync::mpsc::channel::<
-            Result<super::models::ReassembledChunk>,
-        >(reassembly_channel_size);
-        let (file_tx, file_rx) = tokio::sync::mpsc::channel::<
-            Result<super::models::FileEntry>,
-        >(file_channel_size);
-
-        let files_arc = Arc::new(files.to_vec());
-
-        let download_worker = DownloadWorker::new(
-            self.http_fetcher.clone(),
-            parallel_download,
-            progress.clone(),
-            download_tx,
-        );
-
-        let decode_worker = DecodeWorker::new(decode_tx, progress.clone());
-
-        let reassembly_worker = ReassemblyWorker::new(
-            reassembly_tx,
-            progress.clone(),
-            Arc::clone(&files_arc),
-        );
-
-        let demux_worker = DemuxWorker::new(file_tx, files_arc);
+            tokio::sync::mpsc::channel::<Result<RawChunk>>(download_channel_size);
+        // Stage 2 → 3: decoded (decrypted+decompressed) chunks
+        let (decoded_tx, decoded_rx) =
+            tokio::sync::mpsc::channel::<Result<DecodedChunk>>(decode_channel_size);
+        // Stage 3 → consumer: reassembled bytes in offset order
+        let (output_tx, output_rx) =
+            tokio::sync::mpsc::channel::<Result<Vec<u8>>>(output_channel_size);
 
         let mut handles = tokio::task::JoinSet::new();
 
-        // Start download workers (spawns internal tasks, returns immediately)
-        download_worker.start(tasks).await;
+        // Stage 1: spawn chunk downloads (returns immediately)
+        workers::spawn_chunk_downloads(
+            &self.http_fetcher,
+            &self.download_sem,
+            &self.progress,
+            item,
+            download_tx,
+        );
 
-        // Spawn decode worker
+        // Stage 2: decode worker
+        let progress_decode = Arc::clone(&self.progress);
         handles.spawn(async move {
-            decode_worker.start(download_rx).await;
+            workers::run_decode_loop(download_rx, decoded_tx, progress_decode).await;
         });
 
-        // Spawn reassembly worker
+        // Stage 3: reassembly worker
+        let progress_reassembly = Arc::clone(&self.progress);
+        let filename = item.filename.clone();
+        let total_chunks = item.chunks.len();
         handles.spawn(async move {
-            reassembly_worker.start(decode_rx).await;
+            workers::run_reassembly_loop(
+                decoded_rx,
+                output_tx,
+                progress_reassembly,
+                filename,
+                total_chunks,
+            )
+            .await;
         });
 
-        // Spawn demux worker
-        handles.spawn(async move {
-            demux_worker.start(reassembly_rx).await;
-        });
-
-        Ok(DownloadStream::new(file_rx, handles))
+        Ok(FileByteStream::new(
+            item.filename.clone(),
+            item.size,
+            output_rx,
+            handles,
+        ))
     }
 }

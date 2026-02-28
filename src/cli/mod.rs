@@ -200,11 +200,27 @@ pub async fn run_download_pipeline(
     let progress = ProgressManager::new(multi, &files);
     let progress = Arc::new(progress);
 
-    let mut stream = downloader
-        .download(&files, progress.clone())
-        .await?;
+    let pipeline = downloader.create_pipeline(progress.clone());
 
-    writer::write_stream_to_directory(&mut stream, &base_path).await?;
+    let mut tasks = tokio::task::JoinSet::new();
+    for file in &files {
+        let pipeline = pipeline.clone();
+        let base = base_path.clone();
+        let file = file.clone();
+        tasks.spawn(async move {
+            let mut stream = pipeline.download_file(&file)?;
+            writer::write_file(&mut stream, &base).await
+        });
+    }
+
+    while let Some(result) = tasks.join_next().await {
+        result.map_err(|e| {
+            SteamVentError::Io(std::io::Error::other(format!(
+                "File download task panicked: {}",
+                e
+            )))
+        })??;
+    }
 
     progress.finish();
     Ok(())

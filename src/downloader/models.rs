@@ -5,42 +5,46 @@ use std::task::{Context, Poll};
 use crate::error::{ManifestError, Result, SteamVentError};
 use steam_vent_proto::content_manifest::ContentManifestPayload;
 
+use super::http::HttpFetcher;
+
 pub trait ProgressCallback: Send + Sync {
     fn on_download_progress(&self, bytes: u64);
     fn on_decode_progress(&self, bytes: u64);
     fn on_write_progress(&self, bytes: u64);
 }
 
-#[derive(Debug, Clone)]
-pub struct ChunkDownloadTask {
-    pub chunk_id: String,
-    pub depot: Arc<DepotContext>,
-    pub file_index: usize,
-    pub chunk_index: usize,
-    pub chunk_offset: u64,
-    pub compressed_size: u32,
-    pub uncompressed_size: u32,
-    pub crc: u32,
-}
+// ---------------------------------------------------------------------------
+// Internal pipeline types (single-file oriented, no file_index needed)
+// ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone)]
-pub struct CompressedChunk {
-    pub depot: Arc<DepotContext>,
-    pub file_index: usize,
-    pub chunk_index: usize,
+/// A chunk that has been downloaded from CDN but not yet decrypted/decompressed.
+#[derive(Debug)]
+pub(crate) struct RawChunk {
+    /// Byte offset within the file.
     pub chunk_offset: u64,
+    /// Encrypted + compressed data from CDN.
     pub compressed_data: Vec<u8>,
+    /// Expected uncompressed size (for verification).
     pub uncompressed_size: u32,
+    /// Adler32 CRC (for verification).
     pub crc: u32,
+    /// Depot decryption key, cloned from `DepotContext` so the chunk is
+    /// self-contained and doesn't carry an `Arc`.
+    pub depot_key: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Clone)]
-pub struct DownloadedChunk {
-    pub file_index: usize,
-    pub chunk_index: usize,
+/// A chunk that has been decrypted and decompressed, ready for reassembly.
+#[derive(Debug)]
+pub(crate) struct DecodedChunk {
+    /// Byte offset within the file.
     pub chunk_offset: u64,
+    /// Fully decoded data.
     pub data: Vec<u8>,
 }
+
+// ---------------------------------------------------------------------------
+// Depot / manifest types (unchanged)
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct DepotContext {
@@ -64,8 +68,6 @@ impl DownloadManifest {
                 SteamVentError::Manifest(ManifestError::MissingField("mapping.filename"))
             })?;
             // Normalize Windows-style path separators to Unix-style.
-            // Steam manifests may contain backslashes from Windows paths,
-            // which would be treated as literal filename characters on Linux.
             let filename = filename.replace('\\', "/");
             let chunks: Vec<ChunkInfo> = mapping
                 .chunks
@@ -88,7 +90,9 @@ impl DownloadManifest {
                     })?;
 
                     let compressed_size = c.cb_compressed.take().ok_or_else(|| {
-                        SteamVentError::Manifest(ManifestError::MissingField("chunk.cb_compressed"))
+                        SteamVentError::Manifest(ManifestError::MissingField(
+                            "chunk.cb_compressed",
+                        ))
                     })?;
 
                     Ok(ChunkInfo {
@@ -139,44 +143,48 @@ pub struct VersionInfo {
     pub description: String,
 }
 
-/// A chunk that has been downloaded, decoded, and reassembled in the correct
-/// order within its file. Consumers receive these in sequential offset order
-/// per file, so they can be written (or streamed) directly without buffering.
-#[derive(Debug)]
-pub(crate) struct ReassembledChunk {
-    /// Index into the original `DownloadItem` slice.
-    pub file_index: usize,
-    /// Decoded (decrypted + decompressed) data for this chunk.
-    pub data: Vec<u8>,
-    /// `true` when this is the last chunk of the file.
-    pub is_last: bool,
-}
+// ---------------------------------------------------------------------------
+// Public streaming / pipeline types
+// ---------------------------------------------------------------------------
 
-/// A single file from a download, providing metadata and a byte stream.
+/// A byte stream for a single file produced by
+/// [`DownloadPipeline::download_file`].
 ///
 /// Implements [`futures::Stream`] yielding `Result<Vec<u8>>` chunks in
-/// sequential order.  Consuming the stream gives the complete file contents.
-pub struct FileEntry {
+/// sequential offset order.  Consuming the stream gives the complete file
+/// contents.
+///
+/// Dropping this value aborts the background worker tasks that feed the
+/// stream.
+pub struct FileByteStream {
     /// The relative filename (may contain path separators for subdirectories).
     pub filename: String,
     /// The expected total size in bytes, if known from the manifest.
     pub size: Option<u64>,
     rx: tokio::sync::mpsc::Receiver<Result<Vec<u8>>>,
+    /// Worker handles — kept alive so they are aborted on drop.
+    _handles: tokio::task::JoinSet<()>,
 }
 
-impl FileEntry {
+impl FileByteStream {
     pub(crate) fn new(
         filename: String,
         size: Option<u64>,
         rx: tokio::sync::mpsc::Receiver<Result<Vec<u8>>>,
+        handles: tokio::task::JoinSet<()>,
     ) -> Self {
-        Self { filename, size, rx }
+        Self {
+            filename,
+            size,
+            rx,
+            _handles: handles,
+        }
     }
 }
 
-impl Unpin for FileEntry {}
+impl Unpin for FileByteStream {}
 
-impl futures::Stream for FileEntry {
+impl futures::Stream for FileByteStream {
     type Item = Result<Vec<u8>>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -184,38 +192,19 @@ impl futures::Stream for FileEntry {
     }
 }
 
-/// A stream of [`FileEntry`]s produced by [`CdnDownloader::download`].
+/// Shared download pipeline that can download individual files.
 ///
-/// Implements [`futures::Stream`] yielding one [`FileEntry`] per file being
-/// downloaded.  Each `FileEntry` is itself a byte stream.
+/// Created via [`CdnDownloader::create_pipeline`].  All clones share the
+/// same download semaphore, so the total number of concurrent HTTP chunk
+/// downloads is bounded by `parallel_download` regardless of how many
+/// `download_file` calls are in flight.
 ///
-/// **Important:** `FileEntry`s should be consumed concurrently (e.g. by
-/// spawning a task per entry) because chunks from different files arrive
-/// interleaved from the CDN.
-pub struct DownloadStream {
-    rx: tokio::sync::mpsc::Receiver<Result<FileEntry>>,
-    /// Worker handles — kept alive so they are aborted on drop.
-    _handles: tokio::task::JoinSet<()>,
-}
-
-impl DownloadStream {
-    pub(crate) fn new(
-        rx: tokio::sync::mpsc::Receiver<Result<FileEntry>>,
-        handles: tokio::task::JoinSet<()>,
-    ) -> Self {
-        Self {
-            rx,
-            _handles: handles,
-        }
-    }
-}
-
-impl Unpin for DownloadStream {}
-
-impl futures::Stream for DownloadStream {
-    type Item = Result<FileEntry>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.rx.poll_recv(cx)
-    }
+/// This type is [`Clone`] and [`Send`] + [`Sync`], so it can be shared
+/// across tasks freely.
+#[derive(Clone)]
+pub struct DownloadPipeline {
+    pub(crate) http_fetcher: HttpFetcher,
+    pub(crate) download_sem: Arc<tokio::sync::Semaphore>,
+    pub(crate) progress: Arc<dyn ProgressCallback>,
+    pub(crate) parallel_download: usize,
 }

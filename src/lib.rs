@@ -9,7 +9,7 @@ pub use archive::SteamChunk;
 pub use config::{Config, ConfigBuilder, Credentials, RetryPolicy};
 pub use connection::{SteamClient, SteamSession};
 pub use downloader::{
-    CdnDownloader, ChunkDownloadTask, ChunkInfo, CompressedChunk, DepotContext, DownloadItem,
-    DownloadStream, DownloadedChunk, FileEntry, ProgressCallback, VersionInfo,
+    CdnDownloader, ChunkInfo, DepotContext, DownloadItem, DownloadPipeline, FileByteStream,
+    ProgressCallback, VersionInfo,
 };
 pub use error::{ChunkError, ManifestError, Result, SteamVentError, WorkshopError};
