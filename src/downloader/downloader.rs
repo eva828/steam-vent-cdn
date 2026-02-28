@@ -19,7 +19,7 @@ use super::models::{
     ChunkDownloadTask, CompressedChunk, DepotContext, DownloadItem, DownloadManifest,
     DownloadStream, DownloadedChunk, ProgressCallback, VersionInfo,
 };
-use super::workers::{DecodeWorker, DownloadWorker, ReassemblyWorker};
+use super::workers::{DecodeWorker, DemuxWorker, DownloadWorker, ReassemblyWorker};
 
 /// Metadata for a single CDN server, used for intelligent server selection.
 #[derive(Debug, Clone)]
@@ -367,11 +367,13 @@ impl CdnDownloader {
     }
 
     /// Start downloading chunks and return a [`DownloadStream`] that yields
-    /// [`ReassembledChunk`](super::models::ReassembledChunk)s in sequential
-    /// offset order per file.
+    /// one [`FileEntry`](super::models::FileEntry) per file.  Each
+    /// `FileEntry` is a `futures::Stream<Item = Result<Vec<u8>>>` providing
+    /// the file's bytes in order.
     ///
-    /// The caller is responsible for consuming the stream and writing the data
-    /// to the appropriate destination (file, network, etc.).
+    /// **Important:** `FileEntry`s should be consumed concurrently (e.g. by
+    /// spawning a task per entry) to avoid deadlocks caused by interleaved
+    /// CDN chunks.
     pub async fn download(
         &mut self,
         files: &[DownloadItem],
@@ -409,6 +411,7 @@ impl CdnDownloader {
         };
         let decode_channel_size = (logical_cores * 2).max(32);
         let reassembly_channel_size = decode_channel_size;
+        let file_channel_size = files.len().max(8);
 
         let (download_tx, download_rx) =
             tokio::sync::mpsc::channel::<Result<CompressedChunk>>(download_channel_size);
@@ -417,6 +420,11 @@ impl CdnDownloader {
         let (reassembly_tx, reassembly_rx) = tokio::sync::mpsc::channel::<
             Result<super::models::ReassembledChunk>,
         >(reassembly_channel_size);
+        let (file_tx, file_rx) = tokio::sync::mpsc::channel::<
+            Result<super::models::FileEntry>,
+        >(file_channel_size);
+
+        let files_arc = Arc::new(files.to_vec());
 
         let download_worker = DownloadWorker::new(
             self.http_fetcher.clone(),
@@ -430,8 +438,10 @@ impl CdnDownloader {
         let reassembly_worker = ReassemblyWorker::new(
             reassembly_tx,
             progress.clone(),
-            Arc::new(files.to_vec()),
+            Arc::clone(&files_arc),
         );
+
+        let demux_worker = DemuxWorker::new(file_tx, files_arc);
 
         let mut handles = tokio::task::JoinSet::new();
 
@@ -448,6 +458,11 @@ impl CdnDownloader {
             reassembly_worker.start(decode_rx).await;
         });
 
-        Ok(DownloadStream::new(reassembly_rx, handles))
+        // Spawn demux worker
+        handles.spawn(async move {
+            demux_worker.start(reassembly_rx).await;
+        });
+
+        Ok(DownloadStream::new(file_rx, handles))
     }
 }

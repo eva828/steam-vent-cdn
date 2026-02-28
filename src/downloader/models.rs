@@ -143,34 +143,64 @@ pub struct VersionInfo {
 /// order within its file. Consumers receive these in sequential offset order
 /// per file, so they can be written (or streamed) directly without buffering.
 #[derive(Debug)]
-pub struct ReassembledChunk {
+pub(crate) struct ReassembledChunk {
     /// Index into the original `DownloadItem` slice.
     pub file_index: usize,
-    /// Byte offset within the file.
-    pub offset: u64,
     /// Decoded (decrypted + decompressed) data for this chunk.
     pub data: Vec<u8>,
     /// `true` when this is the last chunk of the file.
     pub is_last: bool,
 }
 
-/// A stream of [`ReassembledChunk`]s produced by [`CdnDownloader::download`].
+/// A single file from a download, providing metadata and a byte stream.
 ///
-/// Implements [`futures::Stream`] so it can be used with standard stream
-/// combinators (`next()`, `map()`, `for_each()`, etc.).
+/// Implements [`futures::Stream`] yielding `Result<Vec<u8>>` chunks in
+/// sequential order.  Consuming the stream gives the complete file contents.
+pub struct FileEntry {
+    /// The relative filename (may contain path separators for subdirectories).
+    pub filename: String,
+    /// The expected total size in bytes, if known from the manifest.
+    pub size: Option<u64>,
+    rx: tokio::sync::mpsc::Receiver<Result<Vec<u8>>>,
+}
+
+impl FileEntry {
+    pub(crate) fn new(
+        filename: String,
+        size: Option<u64>,
+        rx: tokio::sync::mpsc::Receiver<Result<Vec<u8>>>,
+    ) -> Self {
+        Self { filename, size, rx }
+    }
+}
+
+impl Unpin for FileEntry {}
+
+impl futures::Stream for FileEntry {
+    type Item = Result<Vec<u8>>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.rx.poll_recv(cx)
+    }
+}
+
+/// A stream of [`FileEntry`]s produced by [`CdnDownloader::download`].
 ///
-/// Chunks arrive in sequential offset order per file. The consumer is
-/// responsible for routing each chunk to the appropriate output (file, network
-/// stream, etc.).
+/// Implements [`futures::Stream`] yielding one [`FileEntry`] per file being
+/// downloaded.  Each `FileEntry` is itself a byte stream.
+///
+/// **Important:** `FileEntry`s should be consumed concurrently (e.g. by
+/// spawning a task per entry) because chunks from different files arrive
+/// interleaved from the CDN.
 pub struct DownloadStream {
-    rx: tokio::sync::mpsc::Receiver<Result<ReassembledChunk>>,
+    rx: tokio::sync::mpsc::Receiver<Result<FileEntry>>,
     /// Worker handles — kept alive so they are aborted on drop.
     _handles: tokio::task::JoinSet<()>,
 }
 
 impl DownloadStream {
     pub(crate) fn new(
-        rx: tokio::sync::mpsc::Receiver<Result<ReassembledChunk>>,
+        rx: tokio::sync::mpsc::Receiver<Result<FileEntry>>,
         handles: tokio::task::JoinSet<()>,
     ) -> Self {
         Self {
@@ -180,8 +210,10 @@ impl DownloadStream {
     }
 }
 
+impl Unpin for DownloadStream {}
+
 impl futures::Stream for DownloadStream {
-    type Item = Result<ReassembledChunk>;
+    type Item = Result<FileEntry>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.rx.poll_recv(cx)

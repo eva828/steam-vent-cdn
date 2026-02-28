@@ -204,7 +204,7 @@ pub async fn run_download_pipeline(
         .download(&files, progress.clone())
         .await?;
 
-    writer::write_stream_to_directory(&mut stream, &files, &base_path).await?;
+    writer::write_stream_to_directory(&mut stream, &base_path).await?;
 
     progress.finish();
     Ok(())

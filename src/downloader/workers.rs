@@ -7,8 +7,8 @@ use crate::error::{Result, SteamVentError};
 use super::http::HttpFetcher;
 
 use super::models::{
-    ChunkDownloadTask, CompressedChunk, DownloadItem, DownloadedChunk, ProgressCallback,
-    ReassembledChunk,
+    ChunkDownloadTask, CompressedChunk, DownloadItem, DownloadedChunk, FileEntry,
+    ProgressCallback, ReassembledChunk,
 };
 
 pub struct DownloadWorker {
@@ -223,7 +223,6 @@ impl ReassemblyWorker {
             if let Err(e) = tx
                 .send(Ok(ReassembledChunk {
                     file_index,
-                    offset: state.next_offset - len,
                     data,
                     is_last,
                 }))
@@ -270,7 +269,6 @@ impl ReassemblyWorker {
                             .reassembly_tx
                             .send(Ok(ReassembledChunk {
                                 file_index,
-                                offset: chunk.chunk_offset,
                                 data: chunk.data,
                                 is_last,
                             }))
@@ -339,6 +337,76 @@ impl ReassemblyWorker {
                     },
                 )))
                 .await;
+        }
+    }
+}
+
+/// Demultiplexes a single stream of [`ReassembledChunk`]s into per-file
+/// [`FileEntry`] byte streams.
+///
+/// For each new file encountered, a `FileEntry` (containing a byte-stream
+/// receiver) is sent to the outer stream.  Subsequent chunks for that file
+/// are forwarded to the per-file channel.
+pub(crate) struct DemuxWorker {
+    file_tx: tokio::sync::mpsc::Sender<crate::error::Result<FileEntry>>,
+    files: Arc<Vec<DownloadItem>>,
+}
+
+impl DemuxWorker {
+    pub fn new(
+        file_tx: tokio::sync::mpsc::Sender<crate::error::Result<FileEntry>>,
+        files: Arc<Vec<DownloadItem>>,
+    ) -> Self {
+        Self { file_tx, files }
+    }
+
+    pub async fn start(
+        self,
+        mut reassembly_rx: tokio::sync::mpsc::Receiver<Result<ReassembledChunk>>,
+    ) {
+        let mut file_channels: HashMap<
+            usize,
+            tokio::sync::mpsc::Sender<crate::error::Result<Vec<u8>>>,
+        > = HashMap::new();
+
+        while let Some(result) = reassembly_rx.recv().await {
+            match result {
+                Ok(chunk) => {
+                    let file_index = chunk.file_index;
+
+                    // Create per-file channel and FileEntry on first chunk.
+                    if !file_channels.contains_key(&file_index) {
+                        let (tx, rx) = tokio::sync::mpsc::channel(8);
+                        let file = &self.files[file_index];
+                        let entry = FileEntry::new(
+                            file.filename.clone(),
+                            file.size,
+                            rx,
+                        );
+                        if self.file_tx.send(Ok(entry)).await.is_err() {
+                            return; // consumer dropped
+                        }
+                        file_channels.insert(file_index, tx);
+                    }
+
+                    let is_last = chunk.is_last;
+                    if let Some(tx) = file_channels.get(&file_index) {
+                        if tx.send(Ok(chunk.data)).await.is_err() {
+                            tracing::warn!("Per-file channel closed for file {}", file_index);
+                        }
+                    }
+
+                    if is_last {
+                        // Drop the sender so the FileEntry stream ends.
+                        file_channels.remove(&file_index);
+                    }
+                }
+                Err(e) => {
+                    // Forward error to outer stream.
+                    let _ = self.file_tx.send(Err(e)).await;
+                    return;
+                }
+            }
         }
     }
 }
