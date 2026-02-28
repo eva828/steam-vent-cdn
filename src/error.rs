@@ -46,6 +46,13 @@ pub enum CdnError {
 
     #[error("Download semaphore closed")]
     SemaphoreClosed,
+
+    #[error("Incomplete download: {received}/{total} chunks for {filename}")]
+    IncompleteDownload {
+        filename: String,
+        received: usize,
+        total: usize,
+    },
 }
 
 #[derive(Error, Debug)]

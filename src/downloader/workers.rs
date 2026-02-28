@@ -1,5 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::path::PathBuf;
 use std::sync::Arc;
+
+use tokio::io::AsyncWriteExt;
 
 use crate::archive::SteamChunk;
 use crate::error::{Result, SteamVentError};
@@ -133,7 +136,6 @@ impl DecodeWorker {
                                 let data = chunk.into_vec();
                                 let len = data.len() as u64;
                                 progress.on_decode_progress(len);
-                                progress.on_write_progress(len);
                                 if let Err(e) = decode_tx.blocking_send(Ok(DownloadedChunk {
                                     file_index: compressed.file_index,
                                     chunk_index: compressed.chunk_index,
@@ -161,8 +163,48 @@ impl DecodeWorker {
     }
 }
 
+/// Tracks the write state for a single file being streamed to disk.
+struct FileWriteState {
+    file_handle: tokio::fs::File,
+    file_path: PathBuf,
+    /// Next byte offset we expect to write (i.e., current end of contiguous written region).
+    next_offset: u64,
+    /// Chunks that arrived out of order, keyed by their byte offset.
+    pending_chunks: BTreeMap<u64, Vec<u8>>,
+    /// Number of chunks already written to disk.
+    chunks_written: usize,
+    /// Total number of chunks expected for this file.
+    total_chunks: usize,
+    /// Running count of bytes written (for progress reporting on completion).
+    bytes_written: u64,
+}
+
+impl FileWriteState {
+    /// Flush any pending chunks that are contiguous from `next_offset`.
+    /// Returns the number of chunks flushed.
+    async fn flush_pending(&mut self) -> std::io::Result<usize> {
+        let mut flushed = 0usize;
+        while let Some(entry) = self.pending_chunks.first_entry() {
+            if *entry.key() != self.next_offset {
+                break;
+            }
+            let data = entry.remove();
+            self.file_handle.write_all(&data).await?;
+            self.next_offset += data.len() as u64;
+            self.bytes_written += data.len() as u64;
+            self.chunks_written += 1;
+            flushed += 1;
+        }
+        Ok(flushed)
+    }
+
+    fn is_complete(&self) -> bool {
+        self.chunks_written == self.total_chunks
+    }
+}
+
 pub struct WriteWorker {
-    base_path: std::path::PathBuf,
+    base_path: PathBuf,
     progress: Arc<dyn ProgressCallback>,
     files: Arc<Vec<DownloadItem>>,
 }
@@ -180,115 +222,122 @@ impl WriteWorker {
         }
     }
 
+    /// Create a `FileWriteState` for the given file index, creating the file on disk.
+    async fn open_file_state(&self, file_index: usize) -> Result<FileWriteState> {
+        let file = &self.files[file_index];
+        let file_path = self.base_path.join(&file.filename);
+
+        if let Some(p) = file_path.parent() {
+            tokio::fs::create_dir_all(p).await?;
+        }
+
+        let file_handle = tokio::fs::File::create(&file_path).await?;
+
+        Ok(FileWriteState {
+            file_handle,
+            file_path,
+            next_offset: 0,
+            pending_chunks: BTreeMap::new(),
+            chunks_written: 0,
+            total_chunks: file.chunks.len(),
+            bytes_written: 0,
+        })
+    }
+
     pub async fn start(
         self,
         mut decode_rx: tokio::sync::mpsc::Receiver<Result<DownloadedChunk>>,
     ) -> Result<()> {
-        // Map from file_index to Vec of (offset, data)
-        let mut chunk_buffers: HashMap<usize, Vec<(u64, Vec<u8>)>> = HashMap::new();
+        let mut file_states: HashMap<usize, FileWriteState> = HashMap::new();
 
         while let Some(result) = decode_rx.recv().await {
             match result {
                 Ok(chunk) => {
-                    let buffers = chunk_buffers.entry(chunk.file_index).or_default();
-                    buffers.push((chunk.chunk_offset, chunk.data));
+                    let data_len = chunk.data.len() as u64;
 
-                    let file = &self.files[chunk.file_index];
-                    let total_chunks = file.chunks.len();
+                    // Lazily open the file on first chunk arrival.
+                    if !file_states.contains_key(&chunk.file_index) {
+                        let state = self.open_file_state(chunk.file_index).await?;
+                        file_states.insert(chunk.file_index, state);
+                    }
+                    let state = file_states
+                        .get_mut(&chunk.file_index)
+                        .expect("file state was just inserted");
 
-                    if buffers.len() == total_chunks {
-                        let file_path = self.base_path.join(&file.filename);
-                        let mut file_data: Vec<(u64, Vec<u8>)> = chunk_buffers
-                            .remove(&chunk.file_index)
-                            .expect("Failed to remove file data from chunk_buffers: this should not happen since we just verified buffers.len() == total_chunks");
-                        
-                        // Sort by offset to ensure correct order
-                        file_data.sort_by_key(|(offset, _)| *offset);
+                    if chunk.chunk_offset == state.next_offset {
+                        // This chunk is the next expected one — write immediately.
+                        state.file_handle.write_all(&chunk.data).await?;
+                        state.next_offset += chunk.data.len() as u64;
+                        state.bytes_written += chunk.data.len() as u64;
+                        state.chunks_written += 1;
 
-                        // Calculate total file size
-                        let total_size = file.size.unwrap_or_else(|| {
-                            file_data
-                                .iter()
-                                .map(|(offset, data)| offset + data.len() as u64)
-                                .max()
-                                .unwrap_or(0)
-                        });
+                        // Flush any subsequent pending chunks that are now contiguous.
+                        state.flush_pending().await?;
+                    } else {
+                        // Out-of-order chunk — buffer it.
+                        state
+                            .pending_chunks
+                            .insert(chunk.chunk_offset, chunk.data);
+                    }
 
-                        // Create buffer initialized with zeros
-                        let mut full_data = vec![0u8; total_size as usize];
+                    self.progress.on_write_progress(data_len);
 
-                        // Write each chunk at its offset
-                        for (offset, data) in file_data {
-                            let start = offset as usize;
-                            let end = start + data.len();
-                            if end <= full_data.len() {
-                                full_data[start..end].copy_from_slice(&data);
-                            } else {
-                                tracing::warn!(
-                                    "Chunk offset {} + size {} exceeds file size {}",
-                                    offset,
-                                    data.len(),
-                                    total_size
-                                );
-                            }
-                        }
-
-                        if let Some(p) = file_path.parent() {
-                            tokio::fs::create_dir_all(p).await?;
-                        }
-                        tokio::fs::write(&file_path, &full_data).await?;
-                        self.progress.on_file_complete(&file_path, full_data.len());
+                    if state.is_complete() {
+                        state.file_handle.flush().await?;
+                        let bytes = state.bytes_written as usize;
+                        let path = state.file_path.clone();
+                        file_states.remove(&chunk.file_index);
+                        self.progress.on_file_complete(&path, bytes);
                     }
                 }
                 Err(e) => {
+                    // Clean up any partially written files before returning.
+                    for (_, state) in file_states.into_iter() {
+                        drop(state.file_handle);
+                        if let Err(rm_err) = tokio::fs::remove_file(&state.file_path).await {
+                            tracing::warn!(
+                                "Failed to remove incomplete file {}: {}",
+                                state.file_path.display(),
+                                rm_err
+                            );
+                        }
+                    }
                     tracing::error!("Error in decode stream: {}", e);
                     return Err(e);
                 }
             }
         }
 
-        for (file_index, mut file_data) in chunk_buffers.into_iter() {
-            if !file_data.is_empty() {
-                let file = &self.files[file_index];
-                let file_path = self.base_path.join(&file.filename);
-                
-                // Sort by offset to ensure correct order
-                file_data.sort_by_key(|(offset, _)| *offset);
-
-                // Calculate total file size
-                let total_size = file.size.unwrap_or_else(|| {
-                    file_data.iter().fold(0u64, |max, (offset, data)| {
-                        (*offset + data.len() as u64).max(max)
-                    })
-                });
-
-                // Create buffer initialized with zeros
-                let mut full_data = vec![0u8; total_size as usize];
-
-                // Write each chunk at its offset
-                for (offset, data) in file_data {
-                    let start = offset as usize;
-                    let end = start + data.len();
-                    if end <= full_data.len() {
-                        full_data[start..end].copy_from_slice(&data);
-                    } else {
-                        tracing::warn!(
-                            "Chunk offset {} + size {} exceeds file size {}",
-                            offset,
-                            data.len(),
-                            total_size
-                        );
-                    }
+        // Channel closed — check for any files that didn't receive all chunks.
+        if !file_states.is_empty() {
+            let mut incomplete_files = Vec::new();
+            for (file_index, state) in file_states.into_iter() {
+                let filename = self.files[file_index].filename.clone();
+                tracing::warn!(
+                    "Incomplete file '{}': received {}/{} chunks",
+                    filename,
+                    state.chunks_written + state.pending_chunks.len(),
+                    state.total_chunks
+                );
+                drop(state.file_handle);
+                if let Err(rm_err) = tokio::fs::remove_file(&state.file_path).await {
+                    tracing::warn!(
+                        "Failed to remove incomplete file {}: {}",
+                        state.file_path.display(),
+                        rm_err
+                    );
                 }
-
-                if let Some(p) = file_path.parent() {
-                    tokio::fs::create_dir_all(p).await?;
-                }
-                let mut file_handle = tokio::fs::File::create(&file_path).await?;
-                use tokio::io::AsyncWriteExt;
-                file_handle.write_all(&full_data).await?;
-                self.progress.on_file_complete(&file_path, full_data.len());
+                incomplete_files.push((filename, state.chunks_written + state.pending_chunks.len(), state.total_chunks));
             }
+
+            let (filename, received, total) = incomplete_files.into_iter().next().unwrap();
+            return Err(SteamVentError::Cdn(
+                crate::error::CdnError::IncompleteDownload {
+                    filename,
+                    received,
+                    total,
+                },
+            ));
         }
 
         Ok(())
