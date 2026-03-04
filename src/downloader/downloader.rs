@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use crate::connection::{ConnectionExt, SteamSession};
-use steam_vent_proto::steammessages_contentsystem_steamclient::CContentServerDirectory_GetServersForSteamPipe_Request;
 use crate::error::{CdnError, Result, SteamSessionError, SteamVentError, WorkshopError};
 use steam_vent::ConnectionTrait;
 use steam_vent_proto::steammessages_clientserver_2::{
     CMsgClientGetDepotDecryptionKey, CMsgClientGetDepotDecryptionKeyResponse,
 };
 use steam_vent_proto::steammessages_contentsystem_steamclient::CContentServerDirectory_GetManifestRequestCode_Request;
+use steam_vent_proto::steammessages_contentsystem_steamclient::CContentServerDirectory_GetServersForSteamPipe_Request;
 use steam_vent_proto::steammessages_publishedfile_steamclient::{
     CPublishedFile_GetChangeHistory_Request, CPublishedFile_GetDetails_Request,
     PublishedFileDetails,
@@ -16,8 +16,8 @@ use steam_vent_proto::steammessages_publishedfile_steamclient::{
 use super::http::HttpFetcher;
 
 use super::models::{
-    DepotContext, DownloadItem, DownloadManifest, DownloadPipeline, FileByteStream,
-    ProgressCallback, RawChunk, DecodedChunk, VersionInfo,
+    DecodedChunk, DepotContext, DownloadItem, DownloadManifest, DownloadPipeline, FileByteStream,
+    ProgressCallback, RawChunk, VersionInfo,
 };
 use super::workers;
 
@@ -73,42 +73,73 @@ impl CdnDownloader {
         Ok(details_resp.publishedfiledetails[0].clone())
     }
 
+    /// Fetch change history for a workshop item.
+    ///
+    /// This method automatically handles pagination to fetch all available versions
+    /// by making multiple API calls if necessary (Steam API limit is 100 per call).
+    ///
+    /// # Arguments
+    ///
+    /// * `item_id` - The Steam Workshop item ID
     pub async fn fetch_change_history(&mut self, item_id: u64) -> Result<Vec<VersionInfo>> {
-        tracing::debug!("Fetching change history for item {}", item_id);
+        let mut all_versions = Vec::new();
+        let mut start_index = 0u32;
 
-        let mut history_req = CPublishedFile_GetChangeHistory_Request::new();
-        history_req.set_publishedfileid(item_id);
-        history_req.set_count(100);
+        loop {
+            tracing::debug!(
+                "Fetching change history for item {} (batch starting at index {})",
+                item_id,
+                start_index
+            );
 
-        let history_resp = self
-            .steam_client
-            .connection_mut()
-            .service_method(history_req)
-            .await
-            .map_err(|e| SteamSessionError::ApiCallFailed(Box::new(e)))
-            .map_err(SteamVentError::SteamSession)?;
+            let mut history_req = CPublishedFile_GetChangeHistory_Request::new();
+            history_req.set_publishedfileid(item_id);
+            history_req.set_startindex(start_index);
+            history_req.set_count(100);
 
-        let versions: Vec<VersionInfo> = history_resp
-            .changes
-            .into_iter()
-            .map(|change| {
-                let timestamp = change.timestamp();
-                let manifest_id = change.manifest_id();
-                let description = change.change_description().to_string();
-                VersionInfo {
-                    timestamp,
-                    manifest_id,
-                    description,
-                }
-            })
-            .collect();
+            let history_resp = self
+                .steam_client
+                .connection_mut()
+                .service_method(history_req)
+                .await
+                .map_err(|e| SteamSessionError::ApiCallFailed(Box::new(e)))
+                .map_err(SteamVentError::SteamSession)?;
 
-        if versions.is_empty() {
-            return Err(SteamVentError::Workshop(WorkshopError::NoVersionsFound));
+            let versions: Vec<VersionInfo> = history_resp
+                .changes
+                .into_iter()
+                .map(|change| {
+                    let timestamp = change.timestamp();
+                    let manifest_id = change.manifest_id();
+                    let description = change.change_description().to_string();
+                    VersionInfo {
+                        timestamp,
+                        manifest_id,
+                        description,
+                    }
+                })
+                .collect();
+
+            let count = versions.len() as u32;
+
+            if count == 0 && all_versions.is_empty() {
+                return Err(SteamVentError::Workshop(WorkshopError::NoVersionsFound));
+            }
+
+            tracing::debug!("Fetched {} versions at index {}", count, start_index);
+
+            all_versions.extend(versions);
+
+            // If we got fewer than 100 items, we've reached the end
+            if count < 100 {
+                break;
+            }
+
+            start_index += count;
         }
 
-        tracing::debug!("Found {} versions", versions.len());
-        Ok(versions)
+        tracing::debug!("Total versions fetched: {}", all_versions.len());
+        Ok(all_versions)
     }
 
     async fn resolve_cdn_hosts(&mut self) -> Result<()> {
@@ -371,10 +402,7 @@ impl CdnDownloader {
     /// The pipeline shares a download semaphore so the total number of
     /// concurrent HTTP chunk downloads is bounded by `parallel_download`
     /// across all `download_file` calls.
-    pub fn create_pipeline(
-        &self,
-        progress: Arc<dyn ProgressCallback>,
-    ) -> DownloadPipeline {
+    pub fn create_pipeline(&self, progress: Arc<dyn ProgressCallback>) -> DownloadPipeline {
         let parallel_download = self.steam_client.config().parallel_download;
         DownloadPipeline {
             http_fetcher: self.http_fetcher.clone(),
