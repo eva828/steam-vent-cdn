@@ -90,9 +90,7 @@ impl DownloadManifest {
                     })?;
 
                     let compressed_size = c.cb_compressed.take().ok_or_else(|| {
-                        SteamVentError::Manifest(ManifestError::MissingField(
-                            "chunk.cb_compressed",
-                        ))
+                        SteamVentError::Manifest(ManifestError::MissingField("chunk.cb_compressed"))
                     })?;
 
                     Ok(ChunkInfo {
@@ -207,4 +205,19 @@ pub struct DownloadPipeline {
     pub(crate) download_sem: Arc<tokio::sync::Semaphore>,
     pub(crate) progress: Arc<dyn ProgressCallback>,
     pub(crate) parallel_download: usize,
+}
+
+impl DownloadPipeline {
+    /// Create a [`CdnRandomAccessReader`] for the given file.
+    ///
+    /// The reader shares the pipeline's download semaphore, so the total
+    /// concurrent CDN requests remain bounded across all readers and
+    /// `download_file` calls.
+    pub fn create_reader(&self, item: &DownloadItem) -> super::reader::CdnRandomAccessReader {
+        super::reader::CdnRandomAccessReader::new(
+            item,
+            self.http_fetcher.clone(),
+            Arc::clone(&self.download_sem),
+        )
+    }
 }
