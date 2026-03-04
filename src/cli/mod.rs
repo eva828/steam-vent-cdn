@@ -141,7 +141,7 @@ pub async fn run_list_versions_pipeline(
     downloader: &mut CdnDownloader,
     item_id: u64,
 ) -> Result<()> {
-    let versions = downloader.fetch_change_history(item_id).await?;
+    let versions = downloader.fetch_all_change_history(item_id).await?;
     ui::display_version_history(item_id, &versions);
     Ok(())
 }
@@ -151,7 +151,7 @@ pub async fn run_download_pipeline(
     downloader: &mut CdnDownloader,
     multi: &MultiProgress,
 ) -> Result<()> {
-    let versions = downloader.fetch_change_history(args.item_id).await?;
+    let versions = downloader.fetch_all_change_history(args.item_id).await?;
 
     let timestamp = if let Some(ts) = args.version {
         ts

@@ -73,60 +73,87 @@ impl CdnDownloader {
         Ok(details_resp.publishedfiledetails[0].clone())
     }
 
-    /// Fetch change history for a workshop item.
+    /// Fetch a specific range of the change history for a workshop item.
     ///
-    /// This method automatically handles pagination to fetch all available versions
-    /// by making multiple API calls if necessary (Steam API limit is 100 per call).
+    /// For fetching all versions, see [`fetch_all_change_history`].
     ///
     /// # Arguments
     ///
     /// * `item_id` - The Steam Workshop item ID
-    pub async fn fetch_change_history(&mut self, item_id: u64) -> Result<Vec<VersionInfo>> {
+    /// * `range` - The range of versions to fetch (e.g., `0..100`)
+    pub async fn fetch_change_history(
+        &mut self,
+        item_id: u64,
+        range: std::ops::Range<u32>,
+    ) -> Result<Vec<VersionInfo>> {
+        let start_index = range.start;
+        let count = range.end.saturating_sub(range.start);
+
+        tracing::debug!(
+            "Fetching change history for item {} (start_index={}, count={})",
+            item_id,
+            start_index,
+            count
+        );
+
+        let mut history_req = CPublishedFile_GetChangeHistory_Request::new();
+        history_req.set_publishedfileid(item_id);
+        history_req.set_startindex(start_index);
+        history_req.set_count(count);
+
+        let history_resp = self
+            .steam_client
+            .connection_mut()
+            .service_method(history_req)
+            .await
+            .map_err(|e| SteamSessionError::ApiCallFailed(Box::new(e)))
+            .map_err(SteamVentError::SteamSession)?;
+
+        let versions: Vec<VersionInfo> = history_resp
+            .changes
+            .into_iter()
+            .map(|change| {
+                let timestamp = change.timestamp();
+                let manifest_id = change.manifest_id();
+                let description = change.change_description().to_string();
+                VersionInfo {
+                    timestamp,
+                    manifest_id,
+                    description,
+                }
+            })
+            .collect();
+
+        tracing::debug!(
+            "Fetched {} versions at index {}",
+            versions.len(),
+            start_index
+        );
+
+        Ok(versions)
+    }
+
+    /// Fetch all change history for a workshop item.
+    ///
+    /// This method automatically handles pagination to fetch all available versions
+    /// by making multiple API calls if necessary.
+    ///
+    /// # Arguments
+    ///
+    /// * `item_id` - The Steam Workshop item ID
+    pub async fn fetch_all_change_history(&mut self, item_id: u64) -> Result<Vec<VersionInfo>> {
         let mut all_versions = Vec::new();
         let mut start_index = 0u32;
 
         loop {
-            tracing::debug!(
-                "Fetching change history for item {} (batch starting at index {})",
-                item_id,
-                start_index
-            );
-
-            let mut history_req = CPublishedFile_GetChangeHistory_Request::new();
-            history_req.set_publishedfileid(item_id);
-            history_req.set_startindex(start_index);
-            history_req.set_count(100);
-
-            let history_resp = self
-                .steam_client
-                .connection_mut()
-                .service_method(history_req)
-                .await
-                .map_err(|e| SteamSessionError::ApiCallFailed(Box::new(e)))
-                .map_err(SteamVentError::SteamSession)?;
-
-            let versions: Vec<VersionInfo> = history_resp
-                .changes
-                .into_iter()
-                .map(|change| {
-                    let timestamp = change.timestamp();
-                    let manifest_id = change.manifest_id();
-                    let description = change.change_description().to_string();
-                    VersionInfo {
-                        timestamp,
-                        manifest_id,
-                        description,
-                    }
-                })
-                .collect();
-
+            let versions = self
+                .fetch_change_history(item_id, start_index..(start_index + 100))
+                .await?;
             let count = versions.len() as u32;
 
             if count == 0 && all_versions.is_empty() {
                 return Err(SteamVentError::Workshop(WorkshopError::NoVersionsFound));
             }
-
-            tracing::debug!("Fetched {} versions at index {}", count, start_index);
 
             all_versions.extend(versions);
 
