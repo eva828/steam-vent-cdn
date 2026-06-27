@@ -6,6 +6,7 @@ use crate::error::{ManifestError, Result, SteamVentError};
 use steam_vent_proto::content_manifest::ContentManifestPayload;
 
 use super::http::HttpFetcher;
+use super::servers::CdnServerList;
 
 pub trait ProgressCallback: Send + Sync {
     fn on_download_progress(&self, bytes: u64);
@@ -48,7 +49,7 @@ pub(crate) struct DecodedChunk {
 
 #[derive(Debug, Clone)]
 pub struct DepotContext {
-    pub server_hosts: Vec<String>,
+    pub(crate) server_hosts: CdnServerList,
     pub depot_id: u32,
     pub depot_key: Option<Vec<u8>>,
 }

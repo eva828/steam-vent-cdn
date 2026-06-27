@@ -3,6 +3,7 @@ pub mod downloader;
 mod http;
 pub mod models;
 pub mod reader;
+pub(crate) mod servers;
 pub(crate) mod workers;
 
 pub use downloader::CdnDownloader;

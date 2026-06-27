@@ -268,6 +268,8 @@ mod tests {
     use std::sync::Arc;
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
+    use crate::downloader::servers::{CdnServer, CdnServerList};
+
     // ---------------------------------------------------------------------------
     // テスト用のダミー ChunkInfo と DepotContext を構築するヘルパー
     // ---------------------------------------------------------------------------
@@ -287,7 +289,13 @@ mod tests {
     /// テスト用の DepotContext（実際のネットワークを使わない）
     fn dummy_depot() -> Arc<DepotContext> {
         Arc::new(DepotContext {
-            server_hosts: vec!["localhost".to_string()],
+            server_hosts: CdnServerList::sorted(vec![CdnServer {
+                vhost: "localhost".to_string(),
+                server_type: "SteamCache".to_string(),
+                weighted_load: 0.0,
+                load: 0,
+                priority_class: 0,
+            }]),
             depot_id: 0,
             depot_key: None,
         })

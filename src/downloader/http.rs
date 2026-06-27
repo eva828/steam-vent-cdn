@@ -2,6 +2,8 @@ use crate::config::Config;
 use crate::error::{CdnError, Result, SteamVentError};
 use reqwest::Client as HttpClient;
 
+use super::servers::CdnServerList;
+
 /// HTTP fetcher for CDN content downloads.
 /// Handles low-level HTTP operations for manifest and chunk downloads.
 #[derive(Clone)]
@@ -30,12 +32,13 @@ impl HttpFetcher {
 
     pub async fn download_manifest(
         &self,
-        server_hosts: &[String],
+        servers: &CdnServerList,
         depot_id: u32,
         manifest_id: u64,
         mrc: u64,
     ) -> Result<Vec<u8>> {
-        for server_host in server_hosts {
+        for i in 0..servers.len() {
+            let server_host = servers.vhost_at(i);
             let manifest_url = format!(
                 "https://{}/depot/{}/manifest/{}/5/{}",
                 server_host, depot_id, manifest_id, mrc
@@ -88,25 +91,25 @@ impl HttpFetcher {
 
     pub async fn download_chunk(
         &self,
-        server_hosts: &[String],
+        servers: &CdnServerList,
         depot_id: u32,
         chunk_id: &str,
         start_server_index: usize,
     ) -> Result<Vec<u8>> {
-        if server_hosts.is_empty() {
+        if servers.is_empty() {
             return Err(SteamVentError::Cdn(CdnError::NoServers));
         }
 
         let mut retry_count = 0;
         let max_attempts = std::cmp::max(
             self.config.retry_policy.max_retries,
-            server_hosts.len() as u32,
+            servers.len() as u32,
         );
 
         loop {
             // Start from the assigned server, rotate through all servers on retry
-            let server_idx = (start_server_index + retry_count as usize) % server_hosts.len();
-            let server_host = &server_hosts[server_idx];
+            let server_idx = (start_server_index + retry_count as usize) % servers.len();
+            let server_host = servers.vhost_at(server_idx);
             let chunk_url = format!(
                 "https://{}/depot/{}/chunk/{}",
                 server_host, depot_id, chunk_id
