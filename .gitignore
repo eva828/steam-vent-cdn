@@ -6,3 +6,7 @@ target/
 
 # Output
 output/
+
+# Nix
+result/
+.direnv
