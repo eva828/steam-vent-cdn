@@ -101,10 +101,8 @@ impl HttpFetcher {
         }
 
         let mut retry_count = 0;
-        let max_attempts = std::cmp::max(
-            self.config.retry_policy.max_retries,
-            servers.len() as u32,
-        );
+        let max_attempts =
+            std::cmp::max(self.config.retry_policy.max_retries, servers.len() as u32);
 
         loop {
             // Start from the assigned server, rotate through all servers on retry

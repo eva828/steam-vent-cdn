@@ -61,7 +61,9 @@ impl CdnServerList {
     }
 
     pub fn new() -> Self {
-        Self { servers: Vec::new() }
+        Self {
+            servers: Vec::new(),
+        }
     }
 
     /// Build from a raw vec of `CdnServer`, applying priority sorting.
