@@ -6,7 +6,7 @@ mod error;
 mod manifest;
 
 pub use archive::SteamChunk;
-pub use config::{Config, ConfigBuilder, Credentials, RetryPolicy};
+pub use config::{Config, ConfigBuilder, Credentials, RetryPolicy, ServerMode};
 pub use connection::{SteamClient, SteamSession};
 pub use downloader::{
     CdnDownloader, CdnRandomAccessReader, ChunkInfo, DepotContext, DownloadItem, DownloadPipeline,

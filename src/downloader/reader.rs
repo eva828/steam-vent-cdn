@@ -12,6 +12,7 @@ use crate::error::{CdnError, Result, SteamVentError};
 
 use super::http::HttpFetcher;
 use super::models::{ChunkInfo, DepotContext, DownloadItem};
+use super::servers::RoundRobin;
 
 /// チャンクフェッチ操作の Future 型エイリアス
 type ChunkFetchFuture = Pin<Box<dyn Future<Output = Result<(usize, Vec<u8>)>> + Send>>;
@@ -27,18 +28,25 @@ type ChunkFetchFuture = Pin<Box<dyn Future<Output = Result<(usize, Vec<u8>)>> + 
 ///
 /// ```rust,no_run
 /// use tokio::io::{AsyncReadExt, AsyncSeekExt};
+/// use steam_vent_cdn::{DownloadItem, DownloadPipeline};
 ///
-/// // DownloadPipeline から作成
-/// let mut reader = pipeline.create_reader(&download_item);
+/// async fn read_header(
+///     pipeline: &DownloadPipeline,
+///     download_item: &DownloadItem,
+/// ) -> Result<(), Box<dyn std::error::Error>> {
+///     // DownloadPipeline から作成
+///     let mut reader = pipeline.create_reader(download_item);
 ///
-/// // 先頭1KBだけ読む（ヘッダー取得に十分な量）
-/// let mut header = vec![0u8; 1024];
-/// reader.read_exact(&mut header).await?;
+///     // 先頭1KBだけ読む（ヘッダー取得に十分な量）
+///     let mut header = vec![0u8; 1024];
+///     reader.read_exact(&mut header).await?;
 ///
-/// // 任意のオフセットにシークして読み取り
-/// reader.seek(std::io::SeekFrom::Start(0x1000)).await?;
-/// let mut data = vec![0u8; 256];
-/// reader.read_exact(&mut data).await?;
+///     // 任意のオフセットにシークして読み取り
+///     reader.seek(std::io::SeekFrom::Start(0x1000)).await?;
+///     let mut data = vec![0u8; 256];
+///     reader.read_exact(&mut data).await?;
+///     Ok(())
+/// }
 /// ```
 pub struct CdnRandomAccessReader {
     /// ファイルのチャンクマップ（offset 昇順にソート済み）
@@ -123,8 +131,7 @@ impl CdnRandomAccessReader {
         let chunk_id = hex::encode(&chunk.sha);
         let uncompressed_size = chunk.uncompressed_size;
         let crc = chunk.crc;
-        let server_hosts = depot.server_hosts.clone();
-        let depot_id = depot.depot_id;
+        let depot = Arc::clone(depot);
         let depot_key = depot.depot_key.clone();
         let http_fetcher = http_fetcher.clone();
         let download_sem = Arc::clone(download_sem);
@@ -136,9 +143,12 @@ impl CdnRandomAccessReader {
                 .await
                 .map_err(|_| SteamVentError::Cdn(CdnError::SemaphoreClosed))?;
 
-            let start_server = chunk_idx % server_hosts.len().max(1);
             let compressed_data = http_fetcher
-                .download_chunk(&server_hosts, depot_id, &chunk_id, start_server)
+                .download_chunk(
+                    &RoundRobin::new(&depot.server_hosts),
+                    depot.depot_id,
+                    &chunk_id,
+                )
                 .await?;
 
             // 復号→展開は CPU ヘビーなので rayon で行う
@@ -268,6 +278,7 @@ mod tests {
     use std::sync::Arc;
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
+    use crate::config::ServerMode;
     use crate::downloader::servers::{CdnServer, CdnServerList};
 
     // ---------------------------------------------------------------------------
@@ -289,13 +300,16 @@ mod tests {
     /// テスト用の DepotContext（実際のネットワークを使わない）
     fn dummy_depot() -> Arc<DepotContext> {
         Arc::new(DepotContext {
-            server_hosts: CdnServerList::sorted(vec![CdnServer {
-                vhost: "localhost".to_string(),
-                server_type: "SteamCache".to_string(),
-                weighted_load: 0.0,
-                load: 0,
-                priority_class: 0,
-            }]),
+            server_hosts: CdnServerList::sorted(
+                vec![CdnServer {
+                    vhost: "localhost".to_string(),
+                    server_type: "SteamCache".to_string(),
+                    weighted_load: 0.0,
+                    load: 0,
+                    priority_class: 0,
+                }],
+                ServerMode::All,
+            ),
             depot_id: 0,
             depot_key: None,
         })

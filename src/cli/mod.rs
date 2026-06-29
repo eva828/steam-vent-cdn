@@ -8,8 +8,8 @@ use indicatif::MultiProgress;
 use progress::ProgressManager;
 use std::sync::Arc;
 use steam_vent_cdn::{
-    CdnDownloader, Config, Credentials, DownloadItem, Result, RetryPolicy, SteamVentError,
-    WorkshopError,
+    CdnDownloader, Config, Credentials, DownloadItem, Result, RetryPolicy, ServerMode,
+    SteamVentError, WorkshopError,
 };
 use tracing_subscriber::Layer;
 use tracing_subscriber::prelude::*;
@@ -91,11 +91,17 @@ pub fn resolve_credentials(
     }
 }
 
-pub fn create_config(credentials: Credentials, app_id: u32, parallel_download: usize) -> Config {
+pub fn create_config(
+    credentials: Credentials,
+    app_id: u32,
+    parallel_download: usize,
+    server_mode: ServerMode,
+) -> Config {
     Config::builder()
         .credentials(credentials)
         .app_id(app_id)
         .parallel_download(parallel_download)
+        .server_mode(server_mode)
         .timeout(std::time::Duration::from_secs(30))
         .retry_policy(RetryPolicy {
             max_retries: 3,

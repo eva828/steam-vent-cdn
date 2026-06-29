@@ -1,4 +1,5 @@
 use clap::Parser;
+use steam_vent_cdn::ServerMode;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -47,6 +48,14 @@ pub struct Args {
 
     #[arg(long, default_value_t = 16, help = "Parallel download connections")]
     pub parallel_download: usize,
+
+    #[arg(
+        long,
+        value_enum,
+        default_value = "all",
+        help = "Server selection mode: all (cache preferred), cdn, or cache"
+    )]
+    pub server_mode: ServerMode,
 
     #[arg(short, long, help = "Enable verbose output")]
     pub verbose: bool,

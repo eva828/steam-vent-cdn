@@ -5,6 +5,7 @@ use crate::archive::SteamChunk;
 use crate::error::{Result, SteamVentError};
 
 use super::http::HttpFetcher;
+use super::servers::RoundRobin;
 
 use super::models::{DecodedChunk, DownloadItem, ProgressCallback, RawChunk};
 
@@ -21,11 +22,10 @@ pub(crate) fn spawn_chunk_downloads(
     item: &DownloadItem,
     download_tx: tokio::sync::mpsc::Sender<Result<RawChunk>>,
 ) {
-    let server_hosts = &item.depot.server_hosts;
     let depot_id = item.depot.depot_id;
     let depot_key = item.depot.depot_key.clone();
 
-    for (i, chunk) in item.chunks.iter().enumerate() {
+    for chunk in item.chunks.iter() {
         let download_sem = Arc::clone(download_sem);
         let download_tx = download_tx.clone();
         let http_fetcher = http_fetcher.clone();
@@ -37,7 +37,7 @@ pub(crate) fn spawn_chunk_downloads(
         let uncompressed_size = chunk.uncompressed_size;
         let crc = chunk.crc;
         let depot_key = depot_key.clone();
-        let server_hosts = server_hosts.clone();
+        let depot = Arc::clone(&item.depot);
 
         tokio::spawn(async move {
             let _permit = match download_sem.acquire().await {
@@ -52,9 +52,8 @@ pub(crate) fn spawn_chunk_downloads(
                 }
             };
 
-            let start_server = i % server_hosts.len().max(1);
             let result = http_fetcher
-                .download_chunk(&server_hosts, depot_id, &chunk_id, start_server)
+                .download_chunk(&RoundRobin::new(&depot.server_hosts), depot_id, &chunk_id)
                 .await;
 
             match result {

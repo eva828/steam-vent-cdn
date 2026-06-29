@@ -12,7 +12,12 @@ async fn main() -> Result<()> {
     tracing::debug!("Item ID: {}", args.item_id);
 
     let credentials = cli::resolve_credentials(args.username.clone(), args.password.clone())?;
-    let config = cli::create_config(credentials, args.app_id, args.parallel_download);
+    let config = cli::create_config(
+        credentials,
+        args.app_id,
+        args.parallel_download,
+        args.server_mode,
+    );
 
     let steam_client = SteamClient::new(config);
     let steam_session = steam_client.connect().await?;

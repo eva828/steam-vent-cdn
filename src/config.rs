@@ -1,5 +1,13 @@
 use std::time::Duration;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum ServerMode {
+    #[default]
+    All,
+    Cdn,
+    Cache,
+}
+
 #[derive(Clone, Default)]
 pub enum Credentials {
     #[default]
@@ -32,6 +40,7 @@ pub struct Config {
     pub retry_policy: RetryPolicy,
     pub app_id: u32,
     pub parallel_download: usize,
+    pub server_mode: ServerMode,
 }
 
 impl Default for Config {
@@ -42,6 +51,7 @@ impl Default for Config {
             retry_policy: RetryPolicy::default(),
             app_id: 1281930,
             parallel_download: 16,
+            server_mode: ServerMode::default(),
         }
     }
 }
@@ -85,6 +95,11 @@ impl ConfigBuilder {
 
     pub fn retry_policy(mut self, retry_policy: RetryPolicy) -> Self {
         self.config.retry_policy = retry_policy;
+        self
+    }
+
+    pub fn server_mode(mut self, server_mode: ServerMode) -> Self {
+        self.config.server_mode = server_mode;
         self
     }
 

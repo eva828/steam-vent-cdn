@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::error::{CdnError, Result, SteamVentError};
 use reqwest::Client as HttpClient;
 
-use super::servers::CdnServerList;
+use super::servers::{CdnServerList, RoundRobin};
 
 /// HTTP fetcher for CDN content downloads.
 /// Handles low-level HTTP operations for manifest and chunk downloads.
@@ -37,8 +37,7 @@ impl HttpFetcher {
         manifest_id: u64,
         mrc: u64,
     ) -> Result<Vec<u8>> {
-        for i in 0..servers.len() {
-            let server_host = servers.vhost_at(i);
+        for server_host in servers.iter() {
             let manifest_url = format!(
                 "https://{}/depot/{}/manifest/{}/5/{}",
                 server_host, depot_id, manifest_id, mrc
@@ -50,20 +49,17 @@ impl HttpFetcher {
 
                 if !resp.status().is_success() {
                     let status = resp.status();
-                    let headers = resp.headers().clone();
-                    let body_bytes = resp.bytes().await.unwrap_or_default();
-                    let body_preview =
-                        String::from_utf8_lossy(&body_bytes[..body_bytes.len().min(256)]);
-                    tracing::warn!(
-                        "HTTP {} - Headers: {:?} - Body: {}",
+                    let headers: Vec<String> = resp
+                        .headers()
+                        .iter()
+                        .map(|(k, v)| format!("{}: {}", k, v.to_str().unwrap_or("<binary>")))
+                        .collect();
+                    let body = resp.bytes().await.unwrap_or_default();
+                    let body_preview = String::from_utf8_lossy(&body[..body.len().min(256)]);
+                    tracing::debug!(
+                        "Manifest request failed (status={}, headers=[{}]): {}",
                         status,
-                        headers
-                            .into_iter()
-                            .filter_map(|(k, v)| v.to_str().ok().map(|v| (
-                                k.map(|k| k.as_str().to_string()).unwrap_or_default(),
-                                v.to_string()
-                            )))
-                            .collect::<Vec<_>>(),
+                        headers.join(", "),
                         body_preview
                     );
                     return Err(SteamVentError::Cdn(CdnError::HttpError { status }));
@@ -79,10 +75,12 @@ impl HttpFetcher {
                         server_host,
                         b.len()
                     );
+                    servers.report_success(server_host);
                     return Ok(b.to_vec());
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to fetch manifest from {}: {}", server_host, e);
+                    servers.report_failure(server_host);
+                    tracing::debug!("Failed to fetch manifest from {}: {}", server_host, e);
                 }
             }
         }
@@ -91,23 +89,16 @@ impl HttpFetcher {
 
     pub async fn download_chunk(
         &self,
-        servers: &CdnServerList,
+        servers: &RoundRobin<'_>,
         depot_id: u32,
         chunk_id: &str,
-        start_server_index: usize,
     ) -> Result<Vec<u8>> {
-        if servers.is_empty() {
-            return Err(SteamVentError::Cdn(CdnError::NoServers));
-        }
-
         let mut retry_count = 0;
         let max_attempts =
             std::cmp::max(self.config.retry_policy.max_retries, servers.len() as u32);
 
         loop {
-            // Start from the assigned server, rotate through all servers on retry
-            let server_idx = (start_server_index + retry_count as usize) % servers.len();
-            let server_host = servers.vhost_at(server_idx);
+            let server_host = servers.next()?;
             let chunk_url = format!(
                 "https://{}/depot/{}/chunk/{}",
                 server_host, depot_id, chunk_id
@@ -126,6 +117,7 @@ impl HttpFetcher {
             match self.http_client.get(&chunk_url).send().await {
                 Ok(resp) if resp.status().is_success() => {
                     let data = resp.bytes().await?;
+                    servers.report_success(server_host);
                     tracing::debug!(
                         "Downloaded chunk {} from {} (compressed: {} bytes)",
                         chunk_id,
@@ -136,26 +128,18 @@ impl HttpFetcher {
                 }
                 Ok(resp) => {
                     let status = resp.status();
-                    let headers = resp.headers().clone();
-                    let body_bytes = resp.bytes().await.unwrap_or_default();
-                    let body_preview =
-                        String::from_utf8_lossy(&body_bytes[..body_bytes.len().min(256)]);
+                    servers.report_failure(server_host);
 
-                    tracing::warn!(
-                        "Retrying chunk {} from {} (attempt {}/{}, status: {}, headers: {:?}, body: {})",
+                    let body = resp.bytes().await.unwrap_or_default();
+                    let body_preview = String::from_utf8_lossy(&body[..body.len().min(256)]);
+                    tracing::debug!(
+                        "Retrying chunk {} from {} (attempt {}/{}, status: {}, body: {})",
                         chunk_id,
                         server_host,
                         retry_count + 1,
                         max_attempts,
                         status,
-                        headers
-                            .into_iter()
-                            .filter_map(|(k, v)| v.to_str().ok().map(|v| (
-                                k.map(|k| k.as_str().to_string()).unwrap_or_default(),
-                                v.to_string()
-                            )))
-                            .collect::<Vec<_>>(),
-                        body_preview
+                        body_preview,
                     );
                     if status == reqwest::StatusCode::NOT_FOUND
                         || status == reqwest::StatusCode::FORBIDDEN
@@ -164,6 +148,8 @@ impl HttpFetcher {
                     }
                 }
                 Err(e) => {
+                    servers.report_failure(server_host);
+
                     let error_kind = if e.is_timeout() {
                         "timeout"
                     } else if e.is_connect() {
@@ -174,7 +160,7 @@ impl HttpFetcher {
                         "network"
                     };
 
-                    tracing::warn!(
+                    tracing::debug!(
                         "Retrying chunk {} from {} (attempt {}/{}, error kind: {}, error: {})",
                         chunk_id,
                         server_host,
@@ -199,6 +185,13 @@ impl HttpFetcher {
                     tokio::time::sleep(self.config.retry_policy.retry_delay).await;
                 }
             } else {
+                let healthy = servers.healthy_count();
+                tracing::warn!(
+                    "Chunk {} failed after {} attempts ({} healthy servers remaining)",
+                    chunk_id,
+                    max_attempts,
+                    healthy
+                );
                 return Err(SteamVentError::Cdn(CdnError::AllServersFailed));
             }
         }
