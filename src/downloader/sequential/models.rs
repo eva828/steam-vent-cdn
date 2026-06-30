@@ -88,6 +88,6 @@ impl Stream for FileByteStream {
 pub struct DownloadPipeline {
     pub(crate) http_fetcher: HttpFetcher,
     pub(crate) download_sem: Arc<tokio::sync::Semaphore>,
-    pub(crate) progress: Arc<dyn super::progress::ProgressCallback>,
+    pub(crate) progress: Arc<dyn crate::downloader::ProgressCallback>,
     pub(crate) parallel_download: usize,
 }

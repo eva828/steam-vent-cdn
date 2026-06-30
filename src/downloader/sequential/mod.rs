@@ -1,9 +1,7 @@
 pub mod models;
-pub mod progress;
 pub(crate) mod workers;
 
 pub use models::{DownloadPipeline, FileByteStream};
-pub use progress::ProgressCallback;
 
 use crate::downloader::item::DownloadItem;
 use crate::error::Result;

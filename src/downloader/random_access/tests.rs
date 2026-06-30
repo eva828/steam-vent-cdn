@@ -8,6 +8,7 @@ use crate::downloader::cdn::DepotContext;
 use crate::downloader::cdn::http::HttpFetcher;
 use crate::downloader::cdn::servers::{CdnServer, CdnServerList};
 use crate::downloader::item::{ChunkInfo, DownloadItem};
+use crate::downloader::progress::NoopProgress;
 use crate::downloader::random_access::reader::CdnRandomAccessReader;
 
 // ---------------------------------------------------------------------------
@@ -73,6 +74,7 @@ fn make_reader_with_cache(
         cache,
         pending_fetch: None,
         seek_pending: false,
+        progress: Arc::new(NoopProgress),
     }
 }
 
@@ -99,6 +101,7 @@ fn test_chunks_are_sorted_on_new() {
         &item,
         dummy_fetcher(),
         Arc::new(tokio::sync::Semaphore::new(1)),
+        Arc::new(NoopProgress),
     );
 
     // ソート後は [offset=0, offset=100] の順になっているはず
@@ -250,6 +253,7 @@ async fn test_reversed_chunks_read_correctly() {
         &item,
         dummy_fetcher(),
         Arc::new(tokio::sync::Semaphore::new(1)),
+        Arc::new(NoopProgress),
     );
 
     // new() 後のソート順を確認
@@ -294,6 +298,7 @@ fn test_total_size_computed_from_chunks_when_none() {
         &item,
         dummy_fetcher(),
         Arc::new(tokio::sync::Semaphore::new(1)),
+        Arc::new(NoopProgress),
     );
 
     assert_eq!(reader.total_size, 1536 + 256); // 1792

@@ -7,6 +7,7 @@ use crate::downloader::cdn::DepotContext;
 use crate::downloader::cdn::http::HttpFetcher;
 use crate::downloader::cdn::servers::RoundRobin;
 use crate::downloader::item::ChunkInfo;
+use crate::downloader::progress::ProgressCallback;
 use crate::error::{CdnError, Result, SteamVentError};
 
 /// チャンクフェッチ操作の Future 型エイリアス
@@ -19,10 +20,13 @@ pub(crate) fn build_fetch_future(
     depot: &Arc<DepotContext>,
     http_fetcher: &HttpFetcher,
     download_sem: &Arc<tokio::sync::Semaphore>,
+    progress: &Arc<dyn ProgressCallback>,
 ) -> ChunkFetchFuture {
     let chunk_id = hex::encode(&chunk.sha);
+    let compressed_size = chunk.compressed_size;
     let uncompressed_size = chunk.uncompressed_size;
     let crc = chunk.crc;
+    let progress = Arc::clone(progress);
     let depot = Arc::clone(depot);
     let depot_key = depot.depot_key.clone();
     let http_fetcher = http_fetcher.clone();
@@ -43,14 +47,21 @@ pub(crate) fn build_fetch_future(
             )
             .await?;
 
+        progress.on_download_progress(compressed_size as u64);
+
         // 復号→展開は CPU ヘビーなので rayon で行う
         let (tx, rx) = tokio::sync::oneshot::channel();
 
         rayon::spawn(move || {
+            let progress = progress.clone();
             let result = SteamChunk::new(compressed_data)
                 .decrypt(depot_key.as_deref())
                 .and_then(|chunk| chunk.decompress_and_verify(uncompressed_size, crc))
-                .map(|chunk| (chunk_idx, chunk.into_vec()));
+                .map(|chunk| {
+                    let data = chunk.into_vec();
+                    progress.on_decode_progress(data.len() as u64);
+                    (chunk_idx, data)
+                });
             let _ = tx.send(result);
         });
 

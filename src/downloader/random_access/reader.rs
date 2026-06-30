@@ -9,6 +9,7 @@ use tokio::io::{AsyncRead, AsyncSeek, ReadBuf};
 use crate::downloader::cdn::DepotContext;
 use crate::downloader::cdn::http::HttpFetcher;
 use crate::downloader::item::{ChunkInfo, DownloadItem};
+use crate::downloader::progress::ProgressCallback;
 use crate::downloader::random_access::fetch::{ChunkFetchFuture, build_fetch_future};
 
 /// CDN上のファイルに対して、オンデマンドでチャンクをフェッチする
@@ -21,15 +22,25 @@ use crate::downloader::random_access::fetch::{ChunkFetchFuture, build_fetch_futu
 /// # 使い方
 ///
 /// ```rust,no_run
+/// use std::sync::Arc;
 /// use tokio::io::{AsyncReadExt, AsyncSeekExt};
-/// use steam_vent_cdn::{CdnDownloader, DownloadItem};
+/// use steam_vent_cdn::{CdnDownloader, DownloadItem, ProgressCallback};
+///
+/// struct MyProgress;
+///
+/// impl ProgressCallback for MyProgress {
+///     fn on_download_progress(&self, _bytes: u64) {}
+///     fn on_decode_progress(&self, _bytes: u64) {}
+///     fn on_write_progress(&self, _bytes: u64) {}
+/// }
 ///
 /// async fn read_header(
 ///     downloader: &CdnDownloader,
 ///     download_item: &DownloadItem,
 /// ) -> Result<(), Box<dyn std::error::Error>> {
 ///     // CdnDownloader から作成
-///     let mut reader = downloader.create_reader(download_item);
+///     let progress = Arc::new(MyProgress);
+///     let mut reader = downloader.create_reader(download_item, progress);
 ///
 ///     // 先頭1KBだけ読む（ヘッダー取得に十分な量）
 ///     let mut header = vec![0u8; 1024];
@@ -61,6 +72,8 @@ pub struct CdnRandomAccessReader {
     pub(crate) pending_fetch: Option<ChunkFetchFuture>,
     /// SeekFrom を一時保持する（start_seek → poll_complete の間）
     pub(crate) seek_pending: bool,
+    /// 進捗コールバック
+    pub(crate) progress: Arc<dyn ProgressCallback>,
 }
 
 impl CdnRandomAccessReader {
@@ -72,6 +85,7 @@ impl CdnRandomAccessReader {
         item: &DownloadItem,
         http_fetcher: HttpFetcher,
         download_sem: Arc<tokio::sync::Semaphore>,
+        progress: Arc<dyn ProgressCallback>,
     ) -> Self {
         // Steam マニフェストのチャンクは必ずしも offset 昇順ではないため、
         // ソートしてから格納する。chunk_index_for_offset の二分探索が正しく機能するために必要。
@@ -97,6 +111,7 @@ impl CdnRandomAccessReader {
             cache: HashMap::new(),
             pending_fetch: None,
             seek_pending: false,
+            progress,
         }
     }
 
@@ -177,6 +192,7 @@ impl AsyncRead for CdnRandomAccessReader {
                 &self.depot,
                 &self.http_fetcher,
                 &self.download_sem,
+                &self.progress,
             );
             self.pending_fetch = Some(fut);
         }

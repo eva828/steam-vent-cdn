@@ -4,7 +4,7 @@ use crate::connection::SteamSession;
 use crate::downloader::cdn::{CdnServerList, HttpFetcher};
 use crate::downloader::item::DownloadItem;
 use crate::downloader::random_access::CdnRandomAccessReader;
-use crate::downloader::sequential::{DownloadPipeline, ProgressCallback};
+use crate::downloader::{DownloadPipeline, ProgressCallback};
 use crate::error::Result;
 
 pub struct CdnDownloader {
@@ -36,11 +36,16 @@ impl CdnDownloader {
         }
     }
 
-    pub fn create_reader(&self, item: &DownloadItem) -> CdnRandomAccessReader {
+    pub fn create_reader(
+        &self,
+        item: &DownloadItem,
+        progress: Arc<dyn ProgressCallback>,
+    ) -> CdnRandomAccessReader {
         CdnRandomAccessReader::new(
             item,
             self.http_fetcher.clone(),
             Arc::clone(&self.download_sem),
+            progress,
         )
     }
 }
