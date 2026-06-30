@@ -22,16 +22,16 @@ use super::servers::CdnServerList;
 use super::workers;
 
 pub struct CdnDownloader {
-    steam_client: SteamSession,
+    steam_session: SteamSession,
     http_fetcher: HttpFetcher,
     cdn_servers: CdnServerList,
 }
 
 impl CdnDownloader {
-    pub fn new(steam_client: SteamSession) -> Result<Self> {
-        let config = steam_client.config().clone();
+    pub fn new(steam_session: SteamSession) -> Result<Self> {
+        let config = steam_session.config().clone();
         Ok(Self {
-            steam_client,
+            steam_session,
             http_fetcher: HttpFetcher::new(config)?,
             cdn_servers: CdnServerList::new(),
         })
@@ -46,12 +46,12 @@ impl CdnDownloader {
             ..Default::default()
         };
 
-        let config = self.steam_client.config();
+        let config = self.steam_session.config();
         let max_retries = config.retry_policy.max_retries;
         let retry_delay = config.retry_policy.retry_delay;
 
         let details_resp = self
-            .steam_client
+            .steam_session
             .connection_mut()
             .service_method_with_retry(details_req, max_retries, retry_delay)
             .await?;
@@ -93,7 +93,7 @@ impl CdnDownloader {
         history_req.set_count(count);
 
         let history_resp = self
-            .steam_client
+            .steam_session
             .connection_mut()
             .service_method(history_req)
             .await
@@ -164,7 +164,7 @@ impl CdnDownloader {
         if !self.cdn_servers.is_empty() {
             return Ok(());
         }
-        self.cdn_servers = CdnServerList::discover(&mut self.steam_client).await?;
+        self.cdn_servers = CdnServerList::discover(&mut self.steam_session).await?;
         Ok(())
     }
 
@@ -183,7 +183,7 @@ impl CdnDownloader {
         code_req.set_app_branch("public".into());
 
         let code_resp = self
-            .steam_client
+            .steam_session
             .connection_mut()
             .service_method(code_req)
             .await
@@ -202,7 +202,7 @@ impl CdnDownloader {
         key_req.set_app_id(app_id);
 
         let key_resp: CMsgClientGetDepotDecryptionKeyResponse = self
-            .steam_client
+            .steam_session
             .connection_mut()
             .job(key_req)
             .await
@@ -328,7 +328,7 @@ impl CdnDownloader {
     /// concurrent HTTP chunk downloads is bounded by `parallel_download`
     /// across all `download_file` calls.
     pub fn create_pipeline(&self, progress: Arc<dyn ProgressCallback>) -> DownloadPipeline {
-        let parallel_download = self.steam_client.config().parallel_download;
+        let parallel_download = self.steam_session.config().parallel_download;
         DownloadPipeline {
             http_fetcher: self.http_fetcher.clone(),
             download_sem: Arc::new(tokio::sync::Semaphore::new(parallel_download)),
