@@ -86,9 +86,10 @@ impl CdnServerList {
             ..Default::default()
         };
 
-        let max_retries = client.max_retries();
-        let retry_delay = client.retry_delay();
-        let server_mode = client.config().server_mode;
+        let config = client.config();
+        let max_retries = config.retry_policy.max_retries;
+        let retry_delay = config.retry_policy.retry_delay;
+        let server_mode = config.server_mode;
 
         let srv_resp = client
             .connection_mut()

@@ -46,8 +46,9 @@ impl CdnDownloader {
             ..Default::default()
         };
 
-        let max_retries = self.steam_client.max_retries();
-        let retry_delay = self.steam_client.retry_delay();
+        let config = self.steam_client.config();
+        let max_retries = config.retry_policy.max_retries;
+        let retry_delay = config.retry_policy.retry_delay;
 
         let details_resp = self
             .steam_client

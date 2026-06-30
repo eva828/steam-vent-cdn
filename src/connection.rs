@@ -1,6 +1,5 @@
 use crate::config::Config;
 use crate::error::{Result, SteamSessionError, SteamVentError};
-use std::time::Duration;
 
 use steam_vent::ServerList;
 use steam_vent::auth::{FileGuardDataStore, UserProvidedAuthConfirmationHandler};
@@ -65,14 +64,6 @@ impl SteamSession {
 
     pub fn config(&self) -> &Config {
         &self.config
-    }
-
-    pub fn max_retries(&self) -> u32 {
-        self.config.retry_policy.max_retries
-    }
-
-    pub fn retry_delay(&self) -> Duration {
-        self.config.retry_policy.retry_delay
     }
 }
 
