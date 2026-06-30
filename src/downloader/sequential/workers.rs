@@ -5,8 +5,8 @@ use crate::downloader::archive::SteamChunk;
 use crate::downloader::cdn::http::HttpFetcher;
 use crate::downloader::cdn::servers::RoundRobin;
 use crate::downloader::item::DownloadItem;
-use crate::downloader::pipeline::models::{DecodedChunk, RawChunk};
-use crate::downloader::pipeline::progress::ProgressCallback;
+use crate::downloader::sequential::models::{DecodedChunk, RawChunk};
+use crate::downloader::sequential::progress::ProgressCallback;
 use crate::error::{Result, SteamVentError};
 
 /// Spawn one tokio task per chunk to download it from CDN.

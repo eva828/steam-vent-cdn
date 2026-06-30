@@ -5,25 +5,11 @@ pub(crate) mod workers;
 pub use models::{DownloadPipeline, FileByteStream};
 pub use progress::ProgressCallback;
 
-use crate::downloader::client::CdnDownloader;
 use crate::downloader::item::DownloadItem;
 use crate::error::Result;
 use models::{DecodedChunk, RawChunk};
-use progress::ProgressCallback as ProgressCallbackTrait;
 use std::sync::Arc;
 use workers::{run_decode_loop, run_reassembly_loop, spawn_chunk_downloads};
-
-impl CdnDownloader {
-    pub fn create_pipeline(&self, progress: Arc<dyn ProgressCallbackTrait>) -> DownloadPipeline {
-        let parallel_download = self.steam_session.config().parallel_download;
-        DownloadPipeline {
-            http_fetcher: self.http_fetcher.clone(),
-            download_sem: Arc::new(tokio::sync::Semaphore::new(parallel_download)),
-            progress,
-            parallel_download,
-        }
-    }
-}
 
 impl DownloadPipeline {
     /// Download a single file and return a [`FileByteStream`] providing its

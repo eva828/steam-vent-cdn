@@ -91,21 +91,3 @@ pub struct DownloadPipeline {
     pub(crate) progress: Arc<dyn super::progress::ProgressCallback>,
     pub(crate) parallel_download: usize,
 }
-
-impl DownloadPipeline {
-    /// Create a [`CdnRandomAccessReader`] for the given file.
-    ///
-    /// The reader shares the pipeline's download semaphore, so the total
-    /// concurrent CDN requests remain bounded across all readers and
-    /// `download_file` calls.
-    pub fn create_reader(
-        &self,
-        item: &super::super::item::DownloadItem,
-    ) -> super::super::reader::CdnRandomAccessReader {
-        super::super::reader::CdnRandomAccessReader::new(
-            item,
-            self.http_fetcher.clone(),
-            Arc::clone(&self.download_sem),
-        )
-    }
-}
