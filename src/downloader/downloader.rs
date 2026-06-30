@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::connection::{ConnectionExt, SteamSession};
 use crate::error::{CdnError, Result, SteamSessionError, SteamVentError, WorkshopError};
+use crate::manifest::ManifestCipher;
 use steam_vent::ConnectionTrait;
 use steam_vent_proto::steammessages_clientserver_2::{
     CMsgClientGetDepotDecryptionKey, CMsgClientGetDepotDecryptionKeyResponse,
@@ -271,7 +272,8 @@ impl CdnDownloader {
             Ok(depot_key) => {
                 tracing::debug!("Depot key received ({} bytes).", depot_key.len());
                 if need_key_for_filenames {
-                    crate::manifest::decrypt_manifest_filenames(&mut manifest, &depot_key)?;
+                    let cipher = ManifestCipher::new(&depot_key)?;
+                    cipher.decrypt_filenames(&mut manifest)?;
                     tracing::debug!("Decrypted manifest filenames.");
                 }
                 depot_key_opt = Some(depot_key);
