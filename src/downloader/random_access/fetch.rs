@@ -53,7 +53,6 @@ pub(crate) fn build_fetch_future(
         let (tx, rx) = tokio::sync::oneshot::channel();
 
         rayon::spawn(move || {
-            let progress = progress.clone();
             let result = SteamChunk::new(compressed_data)
                 .decrypt(depot_key.as_deref())
                 .and_then(|chunk| chunk.decompress_and_verify(uncompressed_size, crc))
