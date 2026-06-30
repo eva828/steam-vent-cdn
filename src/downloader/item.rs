@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use crate::downloader::cdn::DepotContext;
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct ChunkInfo {

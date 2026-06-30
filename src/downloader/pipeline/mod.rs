@@ -5,12 +5,12 @@ pub(crate) mod workers;
 pub use models::{DownloadPipeline, FileByteStream};
 pub use progress::ProgressCallback;
 
-use std::sync::Arc;
 use crate::downloader::client::CdnDownloader;
 use crate::downloader::item::DownloadItem;
 use crate::error::Result;
 use models::{DecodedChunk, RawChunk};
 use progress::ProgressCallback as ProgressCallbackTrait;
+use std::sync::Arc;
 use workers::{run_decode_loop, run_reassembly_loop, spawn_chunk_downloads};
 
 impl CdnDownloader {

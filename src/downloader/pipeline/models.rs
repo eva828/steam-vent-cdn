@@ -1,9 +1,9 @@
+use crate::downloader::cdn::HttpFetcher;
+use crate::error::Result;
+use futures::Stream;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use futures::Stream;
-use crate::downloader::cdn::HttpFetcher;
-use crate::error::Result;
 
 /// A chunk that has been downloaded from CDN but not yet decrypted/decompressed.
 #[derive(Debug)]
@@ -98,7 +98,10 @@ impl DownloadPipeline {
     /// The reader shares the pipeline's download semaphore, so the total
     /// concurrent CDN requests remain bounded across all readers and
     /// `download_file` calls.
-    pub fn create_reader(&self, item: &super::super::item::DownloadItem) -> super::super::reader::CdnRandomAccessReader {
+    pub fn create_reader(
+        &self,
+        item: &super::super::item::DownloadItem,
+    ) -> super::super::reader::CdnRandomAccessReader {
         super::super::reader::CdnRandomAccessReader::new(
             item,
             self.http_fetcher.clone(),

@@ -10,9 +10,9 @@ use tokio::io::{AsyncRead, AsyncSeek, ReadBuf};
 use crate::downloader::archive::SteamChunk;
 use crate::error::{CdnError, Result, SteamVentError};
 
+use super::cdn::DepotContext;
 use super::cdn::http::HttpFetcher;
 use super::cdn::servers::RoundRobin;
-use super::cdn::DepotContext;
 use super::item::{ChunkInfo, DownloadItem};
 
 /// チャンクフェッチ操作の Future 型エイリアス

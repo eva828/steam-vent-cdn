@@ -14,5 +14,5 @@ pub use reader::CdnRandomAccessReader;
 // VersionInfo is used by CLI, so re-export it
 pub use steam_api::VersionInfo;
 
-pub(crate) mod steam_api;
 pub(crate) mod archive;
+pub(crate) mod steam_api;

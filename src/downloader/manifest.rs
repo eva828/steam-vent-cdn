@@ -1,13 +1,15 @@
-use std::sync::Arc;
-use crate::error::{CdnError, EncryptionError, ManifestError, Result, SteamVentError, WorkshopError};
 use crate::downloader::archive::{ArchiveExtractor, ZipArchiveExtractor};
 use crate::downloader::cdn::DepotContext;
 use crate::downloader::client::CdnDownloader;
 use crate::downloader::item::{ChunkInfo, DownloadItem};
+use crate::error::{
+    CdnError, EncryptionError, ManifestError, Result, SteamVentError, WorkshopError,
+};
 use aes::Aes256;
 use aes::cipher::{BlockDecrypt, BlockDecryptMut, Key, KeyInit, KeyIvInit, block_padding::Pkcs7};
 use base64::{Engine as _, engine::general_purpose};
 use cbc::Decryptor;
+use std::sync::Arc;
 use steam_vent_proto::content_manifest::{ContentManifestMetadata, ContentManifestPayload};
 use steam_vent_proto::protobuf::Message;
 
@@ -116,13 +118,12 @@ pub(crate) fn parse_manifest(
     payload_bytes: &[u8],
 ) -> Result<(ContentManifestPayload, Option<ContentManifestMetadata>)> {
     let payload_bytes_vec;
-    let payload_bytes =
-        if let Ok(extractor) = ZipArchiveExtractor::new(payload_bytes) {
-            payload_bytes_vec = extractor.extract()?;
-            &payload_bytes_vec
-        } else {
-            payload_bytes
-        };
+    let payload_bytes = if let Ok(extractor) = ZipArchiveExtractor::new(payload_bytes) {
+        payload_bytes_vec = extractor.extract()?;
+        &payload_bytes_vec
+    } else {
+        payload_bytes
+    };
 
     let mut final_payload = Vec::new();
     let mut metadata: Option<ContentManifestMetadata> = None;
