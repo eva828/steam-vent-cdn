@@ -1,14 +1,18 @@
-#![allow(clippy::module_inception)]
-pub mod downloader;
-mod http;
-pub mod models;
+pub mod cdn;
+pub mod client;
+pub mod item;
+pub mod manifest;
+pub mod pipeline;
 pub mod reader;
-pub(crate) mod servers;
-pub(crate) mod workers;
 
-pub use downloader::CdnDownloader;
-pub use models::{
-    ChunkInfo, DepotContext, DownloadItem, DownloadPipeline, FileByteStream, ProgressCallback,
-    VersionInfo,
-};
+pub use cdn::DepotContext;
+pub use client::CdnDownloader;
+pub use item::{ChunkInfo, DownloadItem, classify_items};
+pub use pipeline::{DownloadPipeline, FileByteStream, ProgressCallback};
 pub use reader::CdnRandomAccessReader;
+
+// VersionInfo is used by CLI, so re-export it
+pub use steam_api::VersionInfo;
+
+pub(crate) mod steam_api;
+pub(crate) mod archive;

@@ -7,12 +7,13 @@ use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncSeek, ReadBuf};
 
-use crate::archive::SteamChunk;
+use crate::downloader::archive::SteamChunk;
 use crate::error::{CdnError, Result, SteamVentError};
 
-use super::http::HttpFetcher;
-use super::models::{ChunkInfo, DepotContext, DownloadItem};
-use super::servers::RoundRobin;
+use super::cdn::http::HttpFetcher;
+use super::cdn::servers::RoundRobin;
+use super::cdn::DepotContext;
+use super::item::{ChunkInfo, DownloadItem};
 
 /// チャンクフェッチ操作の Future 型エイリアス
 type ChunkFetchFuture = Pin<Box<dyn Future<Output = Result<(usize, Vec<u8>)>> + Send>>;
@@ -279,7 +280,7 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
     use crate::config::ServerMode;
-    use crate::downloader::servers::{CdnServer, CdnServerList};
+    use crate::downloader::cdn::servers::{CdnServer, CdnServerList};
 
     // ---------------------------------------------------------------------------
     // テスト用のダミー ChunkInfo と DepotContext を構築するヘルパー

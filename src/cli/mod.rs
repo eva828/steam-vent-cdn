@@ -8,8 +8,8 @@ use indicatif::MultiProgress;
 use progress::ProgressManager;
 use std::sync::Arc;
 use steam_vent_cdn::{
-    CdnDownloader, Config, Credentials, DownloadItem, Result, RetryPolicy, ServerMode,
-    SteamVentError, WorkshopError,
+    CdnDownloader, Config, Credentials, Result, RetryPolicy, ServerMode, SteamVentError,
+    WorkshopError, classify_items,
 };
 use tracing_subscriber::Layer;
 use tracing_subscriber::prelude::*;
@@ -108,39 +108,6 @@ pub fn create_config(
             retry_delay: std::time::Duration::from_secs(1),
         })
         .build()
-}
-
-const FLAG_DIRECTORY: u32 = 0x40;
-
-pub(crate) fn classify_items(items: Vec<DownloadItem>) -> (Vec<DownloadItem>, Vec<DownloadItem>) {
-    let mut directories = Vec::new();
-    let mut files = Vec::new();
-
-    for item in items {
-        let is_directory = match item.flags {
-            Some(flags) => flags & FLAG_DIRECTORY != 0,
-            None => {
-                tracing::warn!(
-                    "flags field is missing for item '{}', treating as file",
-                    item.filename
-                );
-                false
-            }
-        };
-        if is_directory {
-            directories.push(item);
-        } else {
-            files.push(item);
-        }
-    }
-
-    tracing::info!(
-        "Found {} directories and {} files to download.",
-        directories.len(),
-        files.len()
-    );
-
-    (directories, files)
 }
 
 pub async fn run_list_versions_pipeline(

@@ -1,15 +1,12 @@
-mod archive;
 mod config;
 mod connection;
 mod downloader;
 mod error;
-mod manifest;
 
-pub use archive::SteamChunk;
 pub use config::{Config, ConfigBuilder, Credentials, RetryPolicy, ServerMode};
 pub use connection::{SteamClient, SteamSession};
 pub use downloader::{
     CdnDownloader, CdnRandomAccessReader, ChunkInfo, DepotContext, DownloadItem, DownloadPipeline,
-    FileByteStream, ProgressCallback, VersionInfo,
+    FileByteStream, ProgressCallback, VersionInfo, classify_items,
 };
 pub use error::{ChunkError, ManifestError, Result, SteamVentError, WorkshopError};

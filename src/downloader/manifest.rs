@@ -1,5 +1,9 @@
-use crate::archive::ArchiveExtractor;
-use crate::error::{EncryptionError, ManifestError, Result, SteamVentError};
+use std::sync::Arc;
+use crate::error::{CdnError, EncryptionError, ManifestError, Result, SteamVentError, WorkshopError};
+use crate::downloader::archive::{ArchiveExtractor, ZipArchiveExtractor};
+use crate::downloader::cdn::DepotContext;
+use crate::downloader::client::CdnDownloader;
+use crate::downloader::item::{ChunkInfo, DownloadItem};
 use aes::Aes256;
 use aes::cipher::{BlockDecrypt, BlockDecryptMut, Key, KeyInit, KeyIvInit, block_padding::Pkcs7};
 use base64::{Engine as _, engine::general_purpose};
@@ -113,7 +117,7 @@ pub(crate) fn parse_manifest(
 ) -> Result<(ContentManifestPayload, Option<ContentManifestMetadata>)> {
     let payload_bytes_vec;
     let payload_bytes =
-        if let Ok(extractor) = crate::archive::ZipArchiveExtractor::new(payload_bytes) {
+        if let Ok(extractor) = ZipArchiveExtractor::new(payload_bytes) {
             payload_bytes_vec = extractor.extract()?;
             &payload_bytes_vec
         } else {
@@ -187,3 +191,174 @@ pub(crate) fn parse_manifest(
     Ok((manifest, metadata))
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct DownloadManifest {
+    pub manifest: ContentManifestPayload,
+    pub depot: Arc<DepotContext>,
+}
+
+impl DownloadManifest {
+    pub(crate) fn into_download_items(self) -> Result<Vec<DownloadItem>> {
+        let mut items = Vec::new();
+
+        for mut mapping in self.manifest.mappings {
+            let filename = mapping.filename.take().ok_or_else(|| {
+                SteamVentError::Manifest(ManifestError::MissingField("mapping.filename"))
+            })?;
+            // Normalize Windows-style path separators to Unix-style.
+            let filename = filename.replace('\\', "/");
+            let chunks: Vec<ChunkInfo> = mapping
+                .chunks
+                .into_iter()
+                .map(|mut c| -> Result<ChunkInfo> {
+                    let sha = c.sha.take().ok_or_else(|| {
+                        SteamVentError::Manifest(ManifestError::MissingField("chunk.sha"))
+                    })?;
+
+                    let crc = c.crc.take().ok_or_else(|| {
+                        SteamVentError::Manifest(ManifestError::MissingField("chunk.crc"))
+                    })?;
+
+                    let offset = c.offset.take().ok_or_else(|| {
+                        SteamVentError::Manifest(ManifestError::MissingField("chunk.offset"))
+                    })?;
+
+                    let uncompressed_size = c.cb_original.take().ok_or_else(|| {
+                        SteamVentError::Manifest(ManifestError::MissingField("chunk.cb_original"))
+                    })?;
+
+                    let compressed_size = c.cb_compressed.take().ok_or_else(|| {
+                        SteamVentError::Manifest(ManifestError::MissingField("chunk.cb_compressed"))
+                    })?;
+
+                    Ok(ChunkInfo {
+                        sha,
+                        crc,
+                        offset,
+                        uncompressed_size,
+                        compressed_size,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            items.push(DownloadItem {
+                filename,
+                chunks,
+                flags: mapping.flags.take(),
+                size: mapping.size.take(),
+                depot: Arc::clone(&self.depot),
+            });
+        }
+
+        Ok(items)
+    }
+}
+
+impl CdnDownloader {
+    pub(crate) async fn fetch_manifest_by_id(
+        &mut self,
+        manifest_id: u64,
+        app_id: u32,
+    ) -> Result<DownloadManifest> {
+        self.cdn_servers.resolve(&mut self.steam_session).await?;
+        if self.cdn_servers.is_empty() {
+            return Err(SteamVentError::Cdn(CdnError::HostResolutionFailed));
+        }
+
+        let depot_id = app_id;
+
+        tracing::debug!("Manifest ID: {}", manifest_id);
+        tracing::debug!("App/Depot ID: {}", app_id);
+
+        let mrc = self
+            .fetch_manifest_request_code(app_id, depot_id, manifest_id)
+            .await?;
+        tracing::debug!("Manifest Request Code: {}", mrc);
+
+        let manifest_bytes = self
+            .http_fetcher
+            .download_manifest(&self.cdn_servers, depot_id, manifest_id, mrc)
+            .await?;
+
+        let (mut manifest, metadata) = parse_manifest(&manifest_bytes)?;
+
+        let mut depot_key_opt = None;
+        let mut need_key_for_filenames = false;
+        let mut depot_id_for_key = app_id;
+
+        if let Some(ref m) = metadata {
+            let filenames_encrypted = m.filenames_encrypted.ok_or_else(|| {
+                SteamVentError::Manifest(crate::error::ManifestError::MissingField(
+                    "metadata.filenames_encrypted",
+                ))
+            })?;
+            if filenames_encrypted {
+                need_key_for_filenames = true;
+                depot_id_for_key = m.depot_id.ok_or_else(|| {
+                    SteamVentError::Manifest(crate::error::ManifestError::MissingField(
+                        "metadata.depot_id",
+                    ))
+                })?;
+                tracing::debug!(
+                    "Manifest filenames are encrypted (depot_id: {}).",
+                    depot_id_for_key
+                );
+            }
+        }
+
+        match self.fetch_depot_key(app_id, depot_id_for_key).await {
+            Ok(depot_key) => {
+                tracing::debug!("Depot key received ({} bytes).", depot_key.len());
+                if need_key_for_filenames {
+                    let cipher = ManifestCipher::new(&depot_key)?;
+                    cipher.decrypt_filenames(&mut manifest)?;
+                    tracing::debug!("Decrypted manifest filenames.");
+                }
+                depot_key_opt = Some(depot_key);
+            }
+            Err(e) => {
+                if need_key_for_filenames {
+                    tracing::error!("Failed to fetch depot key for filename decryption: {}", e);
+                    return Err(e);
+                } else {
+                    tracing::debug!("No depot key fetched (not needed).");
+                }
+            }
+        }
+
+        let depot = Arc::new(DepotContext {
+            server_hosts: self.cdn_servers.clone(),
+            depot_id,
+            depot_key: depot_key_opt,
+        });
+
+        Ok(DownloadManifest { manifest, depot })
+    }
+
+    /// Fetch the latest manifest ID for a workshop item.
+    pub async fn fetch_latest_manifest_id(&mut self, item_id: u64) -> Result<u64> {
+        let details = self.fetch_item_details(item_id).await?;
+        details
+            .hcontent_file
+            .ok_or_else(|| SteamVentError::Workshop(WorkshopError::MissingManifestId))
+    }
+
+    /// Fetch manifest info for a specific manifest ID.
+    pub async fn fetch_manifest_info(
+        &mut self,
+        item_id: u64,
+        manifest_id: u64,
+    ) -> Result<Vec<DownloadItem>> {
+        let details = self.fetch_item_details(item_id).await?;
+
+        let title = details.title.as_deref().unwrap_or("Unknown");
+        tracing::info!("Title: {}", title);
+
+        let app_id = details
+            .consumer_appid
+            .ok_or_else(|| SteamVentError::Workshop(WorkshopError::MissingConsumerAppId))?;
+
+        let manifest_data = self.fetch_manifest_by_id(manifest_id, app_id).await?;
+        manifest_data.into_download_items()
+    }
+}

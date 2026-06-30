@@ -1,13 +1,13 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::archive::SteamChunk;
+use crate::downloader::archive::SteamChunk;
 use crate::error::{Result, SteamVentError};
-
-use super::http::HttpFetcher;
-use super::servers::RoundRobin;
-
-use super::models::{DecodedChunk, DownloadItem, ProgressCallback, RawChunk};
+use crate::downloader::cdn::http::HttpFetcher;
+use crate::downloader::cdn::servers::RoundRobin;
+use crate::downloader::item::DownloadItem;
+use crate::downloader::pipeline::models::{DecodedChunk, RawChunk};
+use crate::downloader::pipeline::progress::ProgressCallback;
 
 /// Spawn one tokio task per chunk to download it from CDN.
 ///

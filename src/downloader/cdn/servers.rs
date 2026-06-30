@@ -23,7 +23,7 @@ struct ServerHealth {
 
 /// Metadata for a single CDN server, used for intelligent server selection.
 #[derive(Debug, Clone)]
-pub(crate) struct CdnServer {
+pub struct CdnServer {
     pub vhost: String,
     pub server_type: String,
     pub weighted_load: f32,
@@ -32,7 +32,14 @@ pub(crate) struct CdnServer {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct CdnServerList {
+pub struct DepotContext {
+    pub(crate) server_hosts: CdnServerList,
+    pub depot_id: u32,
+    pub depot_key: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CdnServerList {
     cache: Vec<CdnServer>,
     cdn: Vec<CdnServer>,
     cursor: Arc<AtomicUsize>,
@@ -44,7 +51,7 @@ pub(crate) struct CdnServerList {
 ///
 /// Multiple concurrent tasks can share a single `RoundRobin` to distribute
 /// requests evenly across the available CDN servers.
-pub(crate) struct RoundRobin<'a> {
+pub struct RoundRobin<'a> {
     list: &'a CdnServerList,
 }
 
@@ -163,6 +170,14 @@ impl CdnServerList {
             health,
             server_mode,
         }
+    }
+
+    pub async fn resolve(&mut self, session: &mut SteamSession) -> Result<()> {
+        if !self.is_empty() {
+            return Ok(());
+        }
+        *self = Self::discover(session).await?;
+        Ok(())
     }
 
     pub fn is_empty(&self) -> bool {
