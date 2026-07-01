@@ -136,35 +136,7 @@ impl RawManifest {
             let chunks: Vec<ChunkInfo> = mapping
                 .chunks
                 .into_iter()
-                .map(|mut c| -> Result<ChunkInfo> {
-                    let sha = c.sha.take().ok_or_else(|| {
-                        SteamVentError::Manifest(ManifestError::MissingField("chunk.sha"))
-                    })?;
-
-                    let crc = c.crc.take().ok_or_else(|| {
-                        SteamVentError::Manifest(ManifestError::MissingField("chunk.crc"))
-                    })?;
-
-                    let offset = c.offset.take().ok_or_else(|| {
-                        SteamVentError::Manifest(ManifestError::MissingField("chunk.offset"))
-                    })?;
-
-                    let uncompressed_size = c.cb_original.take().ok_or_else(|| {
-                        SteamVentError::Manifest(ManifestError::MissingField("chunk.cb_original"))
-                    })?;
-
-                    let compressed_size = c.cb_compressed.take().ok_or_else(|| {
-                        SteamVentError::Manifest(ManifestError::MissingField("chunk.cb_compressed"))
-                    })?;
-
-                    Ok(ChunkInfo {
-                        sha,
-                        crc,
-                        offset,
-                        uncompressed_size,
-                        compressed_size,
-                    })
-                })
+                .map(ChunkInfo::try_from)
                 .collect::<Result<Vec<_>>>()?;
 
             entries.push(ManifestEntry {

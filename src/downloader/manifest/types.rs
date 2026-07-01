@@ -1,5 +1,7 @@
 use crate::downloader::cdn::DepotContext;
+use crate::error::{ManifestError, Result, SteamVentError};
 use std::sync::Arc;
+use steam_vent_proto::content_manifest::content_manifest_payload::file_mapping::ChunkData;
 
 #[derive(Debug, Clone)]
 pub struct ChunkInfo {
@@ -8,6 +10,30 @@ pub struct ChunkInfo {
     pub offset: u64,
     pub uncompressed_size: u32,
     pub compressed_size: u32,
+}
+
+impl TryFrom<ChunkData> for ChunkInfo {
+    type Error = SteamVentError;
+
+    fn try_from(mut c: ChunkData) -> Result<Self> {
+        Ok(ChunkInfo {
+            sha: c.sha.take().ok_or_else(|| {
+                SteamVentError::Manifest(ManifestError::MissingField("chunk.sha"))
+            })?,
+            crc: c.crc.take().ok_or_else(|| {
+                SteamVentError::Manifest(ManifestError::MissingField("chunk.crc"))
+            })?,
+            offset: c.offset.take().ok_or_else(|| {
+                SteamVentError::Manifest(ManifestError::MissingField("chunk.offset"))
+            })?,
+            uncompressed_size: c.cb_original.take().ok_or_else(|| {
+                SteamVentError::Manifest(ManifestError::MissingField("chunk.cb_original"))
+            })?,
+            compressed_size: c.cb_compressed.take().ok_or_else(|| {
+                SteamVentError::Manifest(ManifestError::MissingField("chunk.cb_compressed"))
+            })?,
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
