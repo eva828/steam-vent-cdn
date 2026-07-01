@@ -192,74 +192,69 @@ pub(crate) fn parse_manifest(
     Ok((manifest, metadata))
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct DownloadManifest {
-    pub manifest: ContentManifestPayload,
-    pub depot: Arc<DepotContext>,
-}
+fn manifest_to_download_items(
+    manifest: ContentManifestPayload,
+    depot: Arc<DepotContext>,
+) -> Result<Vec<DownloadItem>> {
+    let mut items = Vec::new();
 
-impl DownloadManifest {
-    pub(crate) fn into_download_items(self) -> Result<Vec<DownloadItem>> {
-        let mut items = Vec::new();
+    for mut mapping in manifest.mappings {
+        let filename = mapping.filename.take().ok_or_else(|| {
+            SteamVentError::Manifest(ManifestError::MissingField("mapping.filename"))
+        })?;
+        let filename = filename.replace('\\', "/");
+        let chunks: Vec<ChunkInfo> = mapping
+            .chunks
+            .into_iter()
+            .map(|mut c| -> Result<ChunkInfo> {
+                let sha = c.sha.take().ok_or_else(|| {
+                    SteamVentError::Manifest(ManifestError::MissingField("chunk.sha"))
+                })?;
 
-        for mut mapping in self.manifest.mappings {
-            let filename = mapping.filename.take().ok_or_else(|| {
-                SteamVentError::Manifest(ManifestError::MissingField("mapping.filename"))
-            })?;
-            let filename = filename.replace('\\', "/");
-            let chunks: Vec<ChunkInfo> = mapping
-                .chunks
-                .into_iter()
-                .map(|mut c| -> Result<ChunkInfo> {
-                    let sha = c.sha.take().ok_or_else(|| {
-                        SteamVentError::Manifest(ManifestError::MissingField("chunk.sha"))
-                    })?;
+                let crc = c.crc.take().ok_or_else(|| {
+                    SteamVentError::Manifest(ManifestError::MissingField("chunk.crc"))
+                })?;
 
-                    let crc = c.crc.take().ok_or_else(|| {
-                        SteamVentError::Manifest(ManifestError::MissingField("chunk.crc"))
-                    })?;
+                let offset = c.offset.take().ok_or_else(|| {
+                    SteamVentError::Manifest(ManifestError::MissingField("chunk.offset"))
+                })?;
 
-                    let offset = c.offset.take().ok_or_else(|| {
-                        SteamVentError::Manifest(ManifestError::MissingField("chunk.offset"))
-                    })?;
+                let uncompressed_size = c.cb_original.take().ok_or_else(|| {
+                    SteamVentError::Manifest(ManifestError::MissingField("chunk.cb_original"))
+                })?;
 
-                    let uncompressed_size = c.cb_original.take().ok_or_else(|| {
-                        SteamVentError::Manifest(ManifestError::MissingField("chunk.cb_original"))
-                    })?;
+                let compressed_size = c.cb_compressed.take().ok_or_else(|| {
+                    SteamVentError::Manifest(ManifestError::MissingField("chunk.cb_compressed"))
+                })?;
 
-                    let compressed_size = c.cb_compressed.take().ok_or_else(|| {
-                        SteamVentError::Manifest(ManifestError::MissingField("chunk.cb_compressed"))
-                    })?;
-
-                    Ok(ChunkInfo {
-                        sha,
-                        crc,
-                        offset,
-                        uncompressed_size,
-                        compressed_size,
-                    })
+                Ok(ChunkInfo {
+                    sha,
+                    crc,
+                    offset,
+                    uncompressed_size,
+                    compressed_size,
                 })
-                .collect::<Result<Vec<_>>>()?;
+            })
+            .collect::<Result<Vec<_>>>()?;
 
-            items.push(DownloadItem {
-                filename,
-                chunks,
-                flags: mapping.flags.take(),
-                size: mapping.size.take(),
-                depot: Arc::clone(&self.depot),
-            });
-        }
-
-        Ok(items)
+        items.push(DownloadItem {
+            filename,
+            chunks,
+            flags: mapping.flags.take(),
+            size: mapping.size.take(),
+            depot: Arc::clone(&depot),
+        });
     }
+
+    Ok(items)
 }
 
 impl CdnDownloader {
-    pub(crate) async fn fetch_manifest_by_id(
+    pub async fn fetch_manifest_by_id(
         &mut self,
         manifest_id: u64,
         app_id: u32,
-    ) -> Result<DownloadManifest> {
+    ) -> Result<Vec<DownloadItem>> {
         self.cdn_servers.resolve(&mut self.steam_session).await?;
         if self.cdn_servers.is_empty() {
             return Err(SteamVentError::Cdn(CdnError::HostResolutionFailed));
@@ -332,13 +327,13 @@ impl CdnDownloader {
             depot_key: depot_key_opt,
         });
 
-        Ok(DownloadManifest { manifest, depot })
+        manifest_to_download_items(manifest, depot)
     }
 
     pub async fn fetch_latest_manifest_id(&mut self, item_id: u64) -> Result<u64> {
         let details = self.fetch_item_details(item_id).await?;
         details
-            .hcontent_file
+            .manifest_id
             .ok_or_else(|| SteamVentError::Workshop(WorkshopError::MissingManifestId))
     }
 
@@ -349,14 +344,12 @@ impl CdnDownloader {
     ) -> Result<Vec<DownloadItem>> {
         let details = self.fetch_item_details(item_id).await?;
 
-        let title = details.title.as_deref().unwrap_or("Unknown");
-        tracing::info!("Title: {}", title);
+        tracing::info!("Title: {}", details.title);
 
         let app_id = details
             .consumer_appid
             .ok_or_else(|| SteamVentError::Workshop(WorkshopError::MissingConsumerAppId))?;
 
-        let manifest_data = self.fetch_manifest_by_id(manifest_id, app_id).await?;
-        manifest_data.into_download_items()
+        self.fetch_manifest_by_id(manifest_id, app_id).await
     }
 }

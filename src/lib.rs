@@ -7,6 +7,6 @@ pub use config::{Config, ConfigBuilder, Credentials, RetryPolicy, ServerMode};
 pub use connection::{SteamClient, SteamSession};
 pub use downloader::{
     CdnDownloader, CdnRandomAccessReader, ChunkInfo, DepotContext, DownloadItem, DownloadPipeline,
-    FileByteStream, ProgressCallback, VersionInfo, classify_items,
+    FileByteStream, ItemDetails, ProgressCallback, VersionInfo, classify_items,
 };
 pub use error::{ChunkError, ManifestError, Result, SteamVentError, WorkshopError};

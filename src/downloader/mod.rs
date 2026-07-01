@@ -13,7 +13,7 @@ pub use progress::ProgressCallback;
 pub use random_access::CdnRandomAccessReader;
 pub use sequential::{DownloadPipeline, FileByteStream};
 
-pub use steam_api::VersionInfo;
+pub use steam_api::{ItemDetails, VersionInfo};
 
 pub(crate) mod archive;
 pub(crate) mod steam_api;

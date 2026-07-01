@@ -18,11 +18,45 @@ pub struct VersionInfo {
     pub description: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct ItemDetails {
+    pub publishedfileid: u64,
+    pub title: String,
+    pub description: String,
+    pub consumer_appid: Option<u32>,
+    pub manifest_id: Option<u64>,
+    pub preview_url: Option<String>,
+    pub file_url: Option<String>,
+    pub time_created: Option<u32>,
+    pub time_updated: Option<u32>,
+    pub creator: Option<u64>,
+    pub tags: Vec<String>,
+}
+
+impl From<PublishedFileDetails> for ItemDetails {
+    fn from(details: PublishedFileDetails) -> Self {
+        Self {
+            publishedfileid: details.publishedfileid(),
+            title: details.title.unwrap_or_default(),
+            description: details.file_description.unwrap_or_default(),
+            consumer_appid: details.consumer_appid,
+            manifest_id: details.hcontent_file,
+            preview_url: details.preview_url.clone(),
+            file_url: details.file_url.clone(),
+            time_created: details.time_created,
+            time_updated: details.time_updated,
+            creator: details.creator,
+            tags: details
+                .tags
+                .into_iter()
+                .filter_map(|t| t.tag)
+                .collect(),
+        }
+    }
+}
+
 impl CdnDownloader {
-    pub(crate) async fn fetch_item_details(
-        &mut self,
-        item_id: u64,
-    ) -> Result<PublishedFileDetails> {
+    pub async fn fetch_item_details(&mut self, item_id: u64) -> Result<ItemDetails> {
         let details_req = CPublishedFile_GetDetails_Request {
             publishedfileids: vec![item_id],
             ..Default::default()
@@ -43,7 +77,7 @@ impl CdnDownloader {
                 item_id,
             )));
         }
-        Ok(details_resp.publishedfiledetails[0].clone())
+        Ok(details_resp.publishedfiledetails[0].clone().into())
     }
 
     pub async fn fetch_change_history(
