@@ -8,7 +8,7 @@ use tokio::io::{AsyncRead, AsyncSeek, ReadBuf};
 
 use crate::downloader::cdn::DepotContext;
 use crate::downloader::cdn::http::HttpFetcher;
-use crate::downloader::item::{ChunkInfo, DownloadItem};
+use crate::downloader::manifest::{ChunkInfo, ManifestEntry};
 use crate::downloader::progress::ProgressCallback;
 use crate::downloader::random_access::fetch::{ChunkFetchFuture, build_fetch_future};
 
@@ -27,15 +27,15 @@ pub struct CdnRandomAccessReader {
 
 impl CdnRandomAccessReader {
     pub(crate) fn new(
-        item: &DownloadItem,
+        entry: &ManifestEntry,
         http_fetcher: HttpFetcher,
         download_sem: Arc<tokio::sync::Semaphore>,
         progress: Arc<dyn ProgressCallback>,
     ) -> Self {
-        let mut chunks = item.chunks.clone();
+        let mut chunks = entry.chunks.clone();
         chunks.sort_unstable_by_key(|c| c.offset);
 
-        let total_size = item.size.unwrap_or_else(|| {
+        let total_size = entry.size.unwrap_or_else(|| {
             chunks
                 .last()
                 .map(|c| c.offset + c.uncompressed_size as u64)
@@ -44,7 +44,7 @@ impl CdnRandomAccessReader {
 
         Self {
             chunks,
-            depot: Arc::clone(&item.depot),
+            depot: Arc::clone(&entry.depot),
             http_fetcher,
             download_sem,
             total_size,

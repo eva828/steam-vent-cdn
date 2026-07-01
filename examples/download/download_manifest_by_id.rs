@@ -34,15 +34,15 @@ async fn main() -> anyhow::Result<()> {
     let session = client.connect().await?;
     let mut downloader = CdnDownloader::new(session)?;
 
-    let items = downloader.fetch_manifest_by_id(manifest_id, app_id).await?;
+    let manifest = downloader.fetch_manifest_by_id(manifest_id, app_id).await?;
 
     println!(
         "Found {} directories and {} files",
-        items.directories.len(),
-        items.files.len()
+        manifest.directories.len(),
+        manifest.files.len()
     );
 
-    for dir in &items.directories {
+    for dir in &manifest.directories {
         tokio::fs::create_dir_all(output_dir.join(&dir.filename)).await?;
     }
 
@@ -50,7 +50,7 @@ async fn main() -> anyhow::Result<()> {
     let pipeline = downloader.create_pipeline(progress);
 
     let mut tasks = tokio::task::JoinSet::new();
-    for file in &items.files {
+    for file in &manifest.files {
         let pipeline = pipeline.clone();
         let base = output_dir.clone();
         let file = file.clone();

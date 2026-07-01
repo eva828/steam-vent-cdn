@@ -11,7 +11,7 @@ pub struct ChunkInfo {
 }
 
 #[derive(Debug, Clone)]
-pub struct DownloadItem {
+pub struct ManifestEntry {
     pub filename: String,
     pub chunks: Vec<ChunkInfo>,
     pub flags: Option<u32>,
@@ -21,13 +21,13 @@ pub struct DownloadItem {
 
 const FLAG_DIRECTORY: u32 = 0x40;
 
-impl DownloadItem {
+impl ManifestEntry {
     pub fn is_directory(&self) -> bool {
         match self.flags {
             Some(flags) => flags & FLAG_DIRECTORY != 0,
             None => {
                 tracing::warn!(
-                    "flags field is missing for item '{}', treating as file",
+                    "flags field is missing for entry '{}', treating as file",
                     self.filename
                 );
                 false
@@ -37,21 +37,21 @@ impl DownloadItem {
 }
 
 #[derive(Debug, Clone)]
-pub struct ManifestItems {
-    pub directories: Vec<DownloadItem>,
-    pub files: Vec<DownloadItem>,
+pub struct Manifest {
+    pub directories: Vec<ManifestEntry>,
+    pub files: Vec<ManifestEntry>,
 }
 
-impl ManifestItems {
-    pub fn classify(items: Vec<DownloadItem>) -> Self {
+impl Manifest {
+    pub fn classify(entries: Vec<ManifestEntry>) -> Self {
         let mut directories = Vec::new();
         let mut files = Vec::new();
 
-        for item in items {
-            if item.is_directory() {
-                directories.push(item);
+        for entry in entries {
+            if entry.is_directory() {
+                directories.push(entry);
             } else {
-                files.push(item);
+                files.push(entry);
             }
         }
 

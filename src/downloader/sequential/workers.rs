@@ -5,7 +5,7 @@ use crate::downloader::ProgressCallback;
 use crate::downloader::archive::SteamChunk;
 use crate::downloader::cdn::http::HttpFetcher;
 use crate::downloader::cdn::servers::RoundRobin;
-use crate::downloader::item::DownloadItem;
+use crate::downloader::manifest::ManifestEntry;
 use crate::downloader::sequential::models::{DecodedChunk, RawChunk};
 use crate::error::{Result, SteamVentError};
 
@@ -13,13 +13,13 @@ pub(crate) fn spawn_chunk_downloads(
     http_fetcher: &HttpFetcher,
     download_sem: &Arc<tokio::sync::Semaphore>,
     progress: &Arc<dyn ProgressCallback>,
-    item: &DownloadItem,
+    entry: &ManifestEntry,
     download_tx: tokio::sync::mpsc::Sender<Result<RawChunk>>,
 ) {
-    let depot_id = item.depot.depot_id;
-    let depot_key = item.depot.depot_key.clone();
+    let depot_id = entry.depot.depot_id;
+    let depot_key = entry.depot.depot_key.clone();
 
-    for chunk in item.chunks.iter() {
+    for chunk in entry.chunks.iter() {
         let download_sem = Arc::clone(download_sem);
         let download_tx = download_tx.clone();
         let http_fetcher = http_fetcher.clone();
@@ -31,7 +31,7 @@ pub(crate) fn spawn_chunk_downloads(
         let uncompressed_size = chunk.uncompressed_size;
         let crc = chunk.crc;
         let depot_key = depot_key.clone();
-        let depot = Arc::clone(&item.depot);
+        let depot = Arc::clone(&entry.depot);
 
         tokio::spawn(async move {
             let _permit = match download_sem.acquire().await {

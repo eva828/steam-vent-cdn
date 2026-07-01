@@ -147,7 +147,7 @@ pub async fn run_download_pipeline(
     tracing::info!("Downloading version with timestamp: {}", timestamp);
     tracing::info!("Description: {}", version_info.description);
 
-    let items = downloader
+    let manifest = downloader
         .fetch_manifest_info(args.item_id, version_info.manifest_id)
         .await?;
 
@@ -158,23 +158,23 @@ pub async fn run_download_pipeline(
         .join(timestamp.to_string());
 
     if args.list {
-        ui::display_file_list(args.item_id, &items.files);
+        ui::display_file_list(args.item_id, &manifest.files);
         return Ok(());
     }
 
-    for dir in items.directories {
+    for dir in manifest.directories {
         let output_path = base_path.join(&dir.filename);
 
         tokio::fs::create_dir_all(&output_path).await?;
     }
 
-    let progress = ProgressManager::new(multi, &items.files);
+    let progress = ProgressManager::new(multi, &manifest.files);
     let progress = Arc::new(progress);
 
     let pipeline = downloader.create_pipeline(progress.clone());
 
     let mut tasks = tokio::task::JoinSet::new();
-    for file in &items.files {
+    for file in &manifest.files {
         let pipeline = pipeline.clone();
         let base = base_path.clone();
         let file = file.clone();

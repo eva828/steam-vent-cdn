@@ -1,4 +1,4 @@
-use steam_vent_cdn::{DownloadItem, VersionInfo};
+use steam_vent_cdn::{ManifestEntry, VersionInfo};
 
 fn format_timestamp(timestamp: u32) -> String {
     use chrono::{DateTime, Utc};
@@ -18,7 +18,7 @@ pub fn format_file_size(size: u64) -> String {
     }
 }
 
-pub fn display_file_list(item_id: u64, files: &[DownloadItem]) {
+pub fn display_file_list(item_id: u64, files: &[ManifestEntry]) {
     tracing::info!("Workshop item {} files:", item_id);
     for file in files {
         let size = file

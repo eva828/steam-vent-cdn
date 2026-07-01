@@ -6,7 +6,7 @@ use crate::downloader::archive::SteamChunk;
 use crate::downloader::cdn::DepotContext;
 use crate::downloader::cdn::http::HttpFetcher;
 use crate::downloader::cdn::servers::RoundRobin;
-use crate::downloader::item::ChunkInfo;
+use crate::downloader::manifest::ChunkInfo;
 use crate::downloader::progress::ProgressCallback;
 use crate::error::{CdnError, Result, SteamVentError};
 

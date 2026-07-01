@@ -26,17 +26,17 @@ async fn main() -> anyhow::Result<()> {
     let versions = downloader.fetch_all_change_history(item_id).await?;
     let latest = versions.first().expect("No versions found");
 
-    let items = downloader
+    let manifest = downloader
         .fetch_manifest_info(item_id, latest.manifest_id)
         .await?;
 
-    println!("Directories: {}", items.directories.len());
-    for dir in items.directories {
+    println!("Directories: {}", manifest.directories.len());
+    for dir in manifest.directories {
         println!("  [dir] {}", dir.filename);
     }
 
-    println!("Files: {}", items.files.len());
-    for file in items.files {
+    println!("Files: {}", manifest.files.len());
+    for file in manifest.files {
         let size = file.size.unwrap_or(0);
         println!(
             "  {} ({} bytes, {} chunks)",

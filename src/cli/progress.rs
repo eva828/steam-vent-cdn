@@ -1,6 +1,6 @@
 use indicatif::MultiProgress;
 use std::time::Instant;
-use steam_vent_cdn::{DownloadItem, ProgressCallback};
+use steam_vent_cdn::{ManifestEntry, ProgressCallback};
 
 pub struct ProgressManager {
     pb_download: indicatif::ProgressBar,
@@ -10,7 +10,7 @@ pub struct ProgressManager {
 }
 
 impl ProgressManager {
-    pub fn new(multi: &MultiProgress, files: &[DownloadItem]) -> Self {
+    pub fn new(multi: &MultiProgress, files: &[ManifestEntry]) -> Self {
         let total_compressed: u64 = files
             .iter()
             .map(|f| {

@@ -48,11 +48,11 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("Downloading version: {}", version.timestamp);
 
-    let items = downloader
+    let manifest = downloader
         .fetch_manifest_info(item_id, version.manifest_id)
         .await?;
 
-    for dir in &items.directories {
+    for dir in &manifest.directories {
         tokio::fs::create_dir_all(output_dir.join(&dir.filename)).await?;
     }
 
@@ -60,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
     let pipeline = downloader.create_pipeline(progress);
 
     let mut tasks = tokio::task::JoinSet::new();
-    for file in &items.files {
+    for file in &manifest.files {
         let pipeline = pipeline.clone();
         let base = output_dir.clone();
         let file = file.clone();

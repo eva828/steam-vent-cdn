@@ -53,7 +53,7 @@ async fn main() -> anyhow::Result<()> {
         let versions = downloader.fetch_all_change_history(target.item_id).await?;
         let latest = versions.first().expect("No versions found");
 
-        let items = downloader
+        let manifest = downloader
             .fetch_manifest_info(target.item_id, latest.manifest_id)
             .await?;
 
@@ -62,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
             .join(target.item_id.to_string())
             .join(latest.timestamp.to_string());
 
-        for dir in &items.directories {
+        for dir in &manifest.directories {
             tokio::fs::create_dir_all(base.join(&dir.filename)).await?;
         }
 
@@ -70,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
         let pipeline = downloader.create_pipeline(progress);
 
         let mut tasks = tokio::task::JoinSet::new();
-        for file in &items.files {
+        for file in &manifest.files {
             let pipeline = pipeline.clone();
             let file_base = base.clone();
             let file = file.clone();

@@ -32,14 +32,14 @@ async fn main() -> anyhow::Result<()> {
     let versions = downloader.fetch_all_change_history(item_id).await?;
     let latest = versions.first().expect("No versions found");
 
-    let items = downloader
+    let manifest = downloader
         .fetch_manifest_info(item_id, latest.manifest_id)
         .await?;
 
     let progress = Arc::new(common::NoopProgress);
     let pipeline = downloader.create_pipeline(progress);
 
-    let first_file = items.files.first().expect("No files in item");
+    let first_file = manifest.files.first().expect("No files in item");
     let mut stream = pipeline.download_file(first_file)?;
 
     let mut buffer = Vec::new();

@@ -3,14 +3,14 @@ pub(crate) mod workers;
 
 pub use models::{DownloadPipeline, FileByteStream};
 
-use crate::downloader::item::DownloadItem;
+use crate::downloader::manifest::ManifestEntry;
 use crate::error::Result;
 use models::{DecodedChunk, RawChunk};
 use std::sync::Arc;
 use workers::{run_decode_loop, run_reassembly_loop, spawn_chunk_downloads};
 
 impl DownloadPipeline {
-    pub fn download_file(&self, item: &DownloadItem) -> Result<FileByteStream> {
+    pub fn download_file(&self, entry: &ManifestEntry) -> Result<FileByteStream> {
         let parallel_download = self.parallel_download;
 
         let download_channel_size = (parallel_download * 2).max(64);
@@ -40,7 +40,7 @@ impl DownloadPipeline {
             &self.http_fetcher,
             &self.download_sem,
             &self.progress,
-            item,
+            entry,
             download_tx,
         );
 
@@ -50,8 +50,8 @@ impl DownloadPipeline {
         });
 
         let progress_reassembly = Arc::clone(&self.progress);
-        let filename = item.filename.clone();
-        let total_chunks = item.chunks.len();
+        let filename = entry.filename.clone();
+        let total_chunks = entry.chunks.len();
         handles.spawn(async move {
             run_reassembly_loop(
                 decoded_rx,
@@ -64,8 +64,8 @@ impl DownloadPipeline {
         });
 
         Ok(FileByteStream::new(
-            item.filename.clone(),
-            item.size,
+            entry.filename.clone(),
+            entry.size,
             output_rx,
             handles,
         ))

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::connection::SteamSession;
 use crate::downloader::cdn::{CdnServerList, HttpFetcher};
-use crate::downloader::item::DownloadItem;
+use crate::downloader::manifest::ManifestEntry;
 use crate::downloader::random_access::CdnRandomAccessReader;
 use crate::downloader::{DownloadPipeline, ProgressCallback};
 use crate::error::Result;
@@ -38,11 +38,11 @@ impl CdnDownloader {
 
     pub fn create_reader(
         &self,
-        item: &DownloadItem,
+        entry: &ManifestEntry,
         progress: Arc<dyn ProgressCallback>,
     ) -> CdnRandomAccessReader {
         CdnRandomAccessReader::new(
-            item,
+            entry,
             self.http_fetcher.clone(),
             Arc::clone(&self.download_sem),
             progress,
