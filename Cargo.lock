@@ -2445,6 +2445,7 @@ version = "0.1.0"
 dependencies = [
  "adler",
  "aes",
+ "anyhow",
  "base64",
  "block-modes",
  "byteorder",

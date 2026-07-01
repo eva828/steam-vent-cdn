@@ -2,6 +2,7 @@
 name = "steam-vent-cdn"
 version = "0.1.0"
 edition = "2024"
+autoexamples = false
 
 [dependencies]
 base64 = "0.22.1"
@@ -43,3 +44,58 @@ block-modes = "0.9.1"
 zstd = "0.13.3"
 chrono = "0.4"
 rayon = "1.11.0"
+
+[[example]]
+name = "list_versions"
+path = "examples/metadata/list_versions.rs"
+
+[[example]]
+name = "list_files"
+path = "examples/metadata/list_files.rs"
+
+[[example]]
+name = "item_metadata"
+path = "examples/metadata/item_metadata.rs"
+
+[[example]]
+name = "basic_download"
+path = "examples/download/basic_download.rs"
+
+[[example]]
+name = "authenticated_download"
+path = "examples/download/authenticated_download.rs"
+
+[[example]]
+name = "download_specific_version"
+path = "examples/download/download_specific_version.rs"
+
+[[example]]
+name = "download_manifest_by_id"
+path = "examples/download/download_manifest_by_id.rs"
+
+[[example]]
+name = "batch_download"
+path = "examples/download/batch_download.rs"
+
+[[example]]
+name = "stream_to_memory"
+path = "examples/streaming/stream_to_memory.rs"
+
+[[example]]
+name = "random_access_reader"
+path = "examples/streaming/random_access_reader.rs"
+
+[[example]]
+name = "progress_callback"
+path = "examples/configuration/progress_callback.rs"
+
+[[example]]
+name = "advanced_config"
+path = "examples/configuration/advanced_config.rs"
+
+[[example]]
+name = "error_handling"
+path = "examples/configuration/error_handling.rs"
+
+[dev-dependencies]
+anyhow = "1"

@@ -1,0 +1,89 @@
+//! Download multiple Steam Workshop items in one run.
+//!
+//! Usage:
+//!     cargo run --example batch_download -- <APP_ID_1> <ITEM_ID_1> [<APP_ID_2> <ITEM_ID_2> ...]
+
+use std::path::PathBuf;
+
+use steam_vent_cdn::{CdnDownloader, Config, SteamClient, classify_items};
+
+#[path = "../_common.rs"]
+mod common;
+
+#[derive(Clone)]
+struct Target {
+    app_id: u32,
+    item_id: u64,
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() < 3 || args.len() % 2 != 1 {
+        eprintln!(
+            "Usage: cargo run --example batch_download -- <APP_ID_1> <ITEM_ID_1> [<APP_ID_2> <ITEM_ID_2> ...]"
+        );
+        std::process::exit(1);
+    }
+
+    let mut targets = Vec::new();
+    for i in (1..args.len()).step_by(2) {
+        targets.push(Target {
+            app_id: args[i].parse()?,
+            item_id: args[i + 1].parse()?,
+        });
+    }
+
+    let output_dir = PathBuf::from("./output");
+
+    tracing_subscriber::fmt::init();
+
+    let config = Config::builder().build();
+    let client = SteamClient::new(config);
+    let session = client.connect().await?;
+    let mut downloader = CdnDownloader::new(session)?;
+
+    for target in targets {
+        println!(
+            "Downloading app_id={} item_id={}",
+            target.app_id, target.item_id
+        );
+
+        let versions = downloader.fetch_all_change_history(target.item_id).await?;
+        let latest = versions.first().expect("No versions found");
+
+        let items = downloader
+            .fetch_manifest_info(target.item_id, latest.manifest_id)
+            .await?;
+        let (directories, files) = classify_items(items);
+
+        let base = output_dir
+            .join(target.app_id.to_string())
+            .join(target.item_id.to_string())
+            .join(latest.timestamp.to_string());
+
+        for dir in &directories {
+            tokio::fs::create_dir_all(base.join(&dir.filename)).await?;
+        }
+
+        let progress = common::download_progress();
+        let pipeline = downloader.create_pipeline(progress);
+
+        let mut tasks = tokio::task::JoinSet::new();
+        for file in &files {
+            let pipeline = pipeline.clone();
+            let file_base = base.clone();
+            let file = file.clone();
+            tasks.spawn(async move {
+                let mut stream = pipeline.download_file(&file)?;
+                common::write_stream_to_file(&mut stream, &file_base).await
+            });
+        }
+
+        while let Some(result) = tasks.join_next().await {
+            result??;
+        }
+    }
+
+    Ok(())
+}
