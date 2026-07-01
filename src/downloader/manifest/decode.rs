@@ -19,7 +19,7 @@ pub(crate) struct RawManifest {
 }
 
 impl RawManifest {
-    pub(crate) fn parse(payload_bytes: &[u8]) -> Result<Self> {
+    pub(crate) fn decode(payload_bytes: &[u8]) -> Result<Self> {
         let payload_bytes_vec;
         let payload_bytes = if let Ok(extractor) = ZipArchiveExtractor::new(payload_bytes) {
             payload_bytes_vec = extractor.extract()?;

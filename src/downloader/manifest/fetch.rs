@@ -1,6 +1,6 @@
 use crate::downloader::cdn::DepotContext;
 use crate::downloader::client::CdnDownloader;
-use crate::downloader::manifest::parse::RawManifest;
+use crate::downloader::manifest::decode::RawManifest;
 use crate::downloader::manifest::types::Manifest;
 use crate::error::{CdnError, Result, SteamVentError, WorkshopError};
 use std::sync::Arc;
@@ -31,7 +31,7 @@ impl CdnDownloader {
             .download_manifest(&self.cdn_servers, depot_id, manifest_id, mrc)
             .await?;
 
-        let mut raw_manifest = RawManifest::parse(&manifest_bytes)?;
+        let mut raw_manifest = RawManifest::decode(&manifest_bytes)?;
         let need_key_for_filenames = raw_manifest.filenames_encrypted()?;
         let depot_id_for_key = raw_manifest.depot_id_for_key(app_id)?;
 
