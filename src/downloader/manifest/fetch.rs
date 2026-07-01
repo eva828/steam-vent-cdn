@@ -1,7 +1,6 @@
 use crate::downloader::cdn::DepotContext;
 use crate::downloader::client::CdnDownloader;
-use crate::downloader::manifest::cipher::ManifestCipher;
-use crate::downloader::manifest::parse::{manifest_to_entries, parse_manifest};
+use crate::downloader::manifest::parse::RawManifest;
 use crate::downloader::manifest::types::Manifest;
 use crate::error::{CdnError, Result, SteamVentError, WorkshopError};
 use std::sync::Arc;
@@ -32,38 +31,17 @@ impl CdnDownloader {
             .download_manifest(&self.cdn_servers, depot_id, manifest_id, mrc)
             .await?;
 
-        let (mut manifest, metadata) = parse_manifest(&manifest_bytes)?;
+        let mut raw_manifest = RawManifest::parse(&manifest_bytes)?;
+        let need_key_for_filenames = raw_manifest.filenames_encrypted()?;
+        let depot_id_for_key = raw_manifest.depot_id_for_key(app_id)?;
 
         let mut depot_key_opt = None;
-        let mut need_key_for_filenames = false;
-        let mut depot_id_for_key = app_id;
-
-        if let Some(ref m) = metadata {
-            let filenames_encrypted = m.filenames_encrypted.ok_or_else(|| {
-                SteamVentError::Manifest(crate::error::ManifestError::MissingField(
-                    "metadata.filenames_encrypted",
-                ))
-            })?;
-            if filenames_encrypted {
-                need_key_for_filenames = true;
-                depot_id_for_key = m.depot_id.ok_or_else(|| {
-                    SteamVentError::Manifest(crate::error::ManifestError::MissingField(
-                        "metadata.depot_id",
-                    ))
-                })?;
-                tracing::debug!(
-                    "Manifest filenames are encrypted (depot_id: {}).",
-                    depot_id_for_key
-                );
-            }
-        }
 
         match self.fetch_depot_key(app_id, depot_id_for_key).await {
             Ok(depot_key) => {
                 tracing::debug!("Depot key received ({} bytes).", depot_key.len());
                 if need_key_for_filenames {
-                    let cipher = ManifestCipher::new(&depot_key)?;
-                    cipher.decrypt_filenames(&mut manifest)?;
+                    raw_manifest.decrypt_filenames(&depot_key)?;
                     tracing::debug!("Decrypted manifest filenames.");
                 }
                 depot_key_opt = Some(depot_key);
@@ -84,7 +62,7 @@ impl CdnDownloader {
             depot_key: depot_key_opt,
         });
 
-        let entries = manifest_to_entries(manifest, depot)?;
+        let entries = raw_manifest.into_entries(depot)?;
         Ok(Manifest::classify(entries))
     }
 
