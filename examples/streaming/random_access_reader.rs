@@ -9,6 +9,9 @@ use std::sync::Arc;
 use steam_vent_cdn::{CdnDownloader, Config, ProgressCallback, SteamClient};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
+#[path = "../_common.rs"]
+mod common;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -45,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
         .find(|f| f.filename == filename)
         .ok_or_else(|| anyhow::anyhow!("File '{}' not found in manifest", filename))?;
 
-    let progress = Arc::new(NoopProgress);
+    let progress = Arc::new(common::NoopProgress);
     let mut reader = downloader.create_reader(&file, progress);
 
     reader.seek(SeekFrom::Start(offset)).await?;
@@ -65,12 +68,4 @@ async fn main() -> anyhow::Result<()> {
     );
 
     Ok(())
-}
-
-struct NoopProgress;
-
-impl ProgressCallback for NoopProgress {
-    fn on_download_progress(&self, _bytes: u64) {}
-    fn on_decode_progress(&self, _bytes: u64) {}
-    fn on_write_progress(&self, _bytes: u64) {}
 }

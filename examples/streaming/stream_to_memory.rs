@@ -8,6 +8,9 @@ use std::sync::Arc;
 use futures::StreamExt;
 use steam_vent_cdn::{CdnDownloader, Config, ProgressCallback, SteamClient};
 
+#[path = "../_common.rs"]
+mod common;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -33,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
         .fetch_manifest_info(item_id, latest.manifest_id)
         .await?;
 
-    let progress = Arc::new(NoopProgress);
+    let progress = Arc::new(common::NoopProgress);
     let pipeline = downloader.create_pipeline(progress);
 
     let first_file = items.files.first().expect("No files in item");
@@ -51,12 +54,4 @@ async fn main() -> anyhow::Result<()> {
     );
 
     Ok(())
-}
-
-struct NoopProgress;
-
-impl ProgressCallback for NoopProgress {
-    fn on_download_progress(&self, _bytes: u64) {}
-    fn on_decode_progress(&self, _bytes: u64) {}
-    fn on_write_progress(&self, _bytes: u64) {}
 }
