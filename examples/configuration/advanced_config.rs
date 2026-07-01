@@ -4,6 +4,7 @@
 //!     cargo run --example advanced_config -- <APP_ID> <ITEM_ID>
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use steam_vent_cdn::{
@@ -55,7 +56,7 @@ async fn main() -> anyhow::Result<()> {
         tokio::fs::create_dir_all(output_dir.join(&dir.filename)).await?;
     }
 
-    let progress = common::download_progress();
+    let progress = Arc::new(common::NoopProgress);
     let pipeline = downloader.create_pipeline(progress);
 
     let mut tasks = tokio::task::JoinSet::new();

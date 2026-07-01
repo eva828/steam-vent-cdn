@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
 use std::path::Path;
-use std::sync::Arc;
 
 use futures::StreamExt;
 use steam_vent_cdn::{FileByteStream, ProgressCallback, Result};
@@ -33,8 +32,4 @@ pub async fn write_stream_to_file(
 
     tracing::info!("Wrote {}", path.display());
     Ok(())
-}
-
-pub fn download_progress() -> Arc<dyn ProgressCallback> {
-    Arc::new(NoopProgress)
 }

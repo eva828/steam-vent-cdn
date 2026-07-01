@@ -4,6 +4,7 @@
 //!     cargo run --example batch_download -- <APP_ID_1> <ITEM_ID_1> [<APP_ID_2> <ITEM_ID_2> ...]
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use steam_vent_cdn::{CdnDownloader, Config, SteamClient, classify_items};
 
@@ -66,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
             tokio::fs::create_dir_all(base.join(&dir.filename)).await?;
         }
 
-        let progress = common::download_progress();
+        let progress = Arc::new(common::NoopProgress);
         let pipeline = downloader.create_pipeline(progress);
 
         let mut tasks = tokio::task::JoinSet::new();
