@@ -7,9 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use steam_vent_cdn::{
-    CdnDownloader, Config, ProgressCallback, SteamClient, classify_items,
-};
+use steam_vent_cdn::{CdnDownloader, Config, ProgressCallback, SteamClient};
 
 #[path = "../_common.rs"]
 mod common;
@@ -39,9 +37,8 @@ async fn main() -> anyhow::Result<()> {
     let items = downloader
         .fetch_manifest_info(item_id, latest.manifest_id)
         .await?;
-    let (directories, files) = classify_items(items);
 
-    for dir in &directories {
+    for dir in &items.directories {
         tokio::fs::create_dir_all(output_dir.join(&dir.filename)).await?;
     }
 
@@ -49,7 +46,7 @@ async fn main() -> anyhow::Result<()> {
     let pipeline = downloader.create_pipeline(progress.clone());
 
     let mut tasks = tokio::task::JoinSet::new();
-    for file in &files {
+    for file in &items.files {
         let pipeline = pipeline.clone();
         let base = output_dir.clone();
         let file = file.clone();

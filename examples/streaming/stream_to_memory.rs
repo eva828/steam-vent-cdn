@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use futures::StreamExt;
-use steam_vent_cdn::{CdnDownloader, Config, ProgressCallback, SteamClient, classify_items};
+use steam_vent_cdn::{CdnDownloader, Config, ProgressCallback, SteamClient};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -32,12 +32,11 @@ async fn main() -> anyhow::Result<()> {
     let items = downloader
         .fetch_manifest_info(item_id, latest.manifest_id)
         .await?;
-    let (_, files) = classify_items(items);
 
     let progress = Arc::new(NoopProgress);
     let pipeline = downloader.create_pipeline(progress);
 
-    let first_file = files.first().expect("No files in item");
+    let first_file = items.files.first().expect("No files in item");
     let mut stream = pipeline.download_file(first_file)?;
 
     let mut buffer = Vec::new();

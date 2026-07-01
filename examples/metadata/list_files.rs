@@ -3,7 +3,7 @@
 //! Usage:
 //!     cargo run --example list_files -- <APP_ID> <ITEM_ID>
 
-use steam_vent_cdn::{CdnDownloader, Config, SteamClient, classify_items};
+use steam_vent_cdn::{CdnDownloader, Config, SteamClient};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -29,15 +29,14 @@ async fn main() -> anyhow::Result<()> {
     let items = downloader
         .fetch_manifest_info(item_id, latest.manifest_id)
         .await?;
-    let (directories, files) = classify_items(items);
 
-    println!("Directories: {}", directories.len());
-    for dir in directories {
+    println!("Directories: {}", items.directories.len());
+    for dir in items.directories {
         println!("  [dir] {}", dir.filename);
     }
 
-    println!("Files: {}", files.len());
-    for file in files {
+    println!("Files: {}", items.files.len());
+    for file in items.files {
         let size = file.size.unwrap_or(0);
         println!(
             "  {} ({} bytes, {} chunks)",

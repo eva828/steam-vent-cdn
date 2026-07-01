@@ -1,7 +1,7 @@
 use crate::downloader::archive::{ArchiveExtractor, ZipArchiveExtractor};
 use crate::downloader::cdn::DepotContext;
 use crate::downloader::client::CdnDownloader;
-use crate::downloader::item::{ChunkInfo, DownloadItem};
+use crate::downloader::item::{ChunkInfo, DownloadItem, ManifestItems};
 use crate::error::{
     CdnError, EncryptionError, ManifestError, Result, SteamVentError, WorkshopError,
 };
@@ -254,7 +254,7 @@ impl CdnDownloader {
         &mut self,
         manifest_id: u64,
         app_id: u32,
-    ) -> Result<Vec<DownloadItem>> {
+    ) -> Result<ManifestItems> {
         self.cdn_servers.resolve(&mut self.steam_session).await?;
         if self.cdn_servers.is_empty() {
             return Err(SteamVentError::Cdn(CdnError::HostResolutionFailed));
@@ -327,7 +327,8 @@ impl CdnDownloader {
             depot_key: depot_key_opt,
         });
 
-        manifest_to_download_items(manifest, depot)
+        let items = manifest_to_download_items(manifest, depot)?;
+        Ok(ManifestItems::classify(items))
     }
 
     pub async fn fetch_latest_manifest_id(&mut self, item_id: u64) -> Result<u64> {
@@ -341,7 +342,7 @@ impl CdnDownloader {
         &mut self,
         item_id: u64,
         manifest_id: u64,
-    ) -> Result<Vec<DownloadItem>> {
+    ) -> Result<ManifestItems> {
         let details = self.fetch_item_details(item_id).await?;
 
         tracing::info!("Title: {}", details.title);

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use steam_vent_cdn::{
-    CdnDownloader, Config, SteamClient, SteamVentError, WorkshopError, classify_items,
+    CdnDownloader, Config, SteamClient, SteamVentError, WorkshopError,
 };
 
 #[path = "../_common.rs"]
@@ -51,9 +51,8 @@ async fn main() -> anyhow::Result<()> {
     let items = downloader
         .fetch_manifest_info(item_id, version.manifest_id)
         .await?;
-    let (directories, files) = classify_items(items);
 
-    for dir in &directories {
+    for dir in &items.directories {
         tokio::fs::create_dir_all(output_dir.join(&dir.filename)).await?;
     }
 
@@ -61,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
     let pipeline = downloader.create_pipeline(progress);
 
     let mut tasks = tokio::task::JoinSet::new();
-    for file in &files {
+    for file in &items.files {
         let pipeline = pipeline.clone();
         let base = output_dir.clone();
         let file = file.clone();

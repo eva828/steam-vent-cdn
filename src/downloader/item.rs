@@ -21,33 +21,46 @@ pub struct DownloadItem {
 
 const FLAG_DIRECTORY: u32 = 0x40;
 
-pub fn classify_items(items: Vec<DownloadItem>) -> (Vec<DownloadItem>, Vec<DownloadItem>) {
-    let mut directories = Vec::new();
-    let mut files = Vec::new();
-
-    for item in items {
-        let is_directory = match item.flags {
+impl DownloadItem {
+    pub fn is_directory(&self) -> bool {
+        match self.flags {
             Some(flags) => flags & FLAG_DIRECTORY != 0,
             None => {
                 tracing::warn!(
                     "flags field is missing for item '{}', treating as file",
-                    item.filename
+                    self.filename
                 );
                 false
             }
-        };
-        if is_directory {
-            directories.push(item);
-        } else {
-            files.push(item);
         }
     }
+}
 
-    tracing::info!(
-        "Found {} directories and {} files to download.",
-        directories.len(),
-        files.len()
-    );
+#[derive(Debug, Clone)]
+pub struct ManifestItems {
+    pub directories: Vec<DownloadItem>,
+    pub files: Vec<DownloadItem>,
+}
 
-    (directories, files)
+impl ManifestItems {
+    pub fn classify(items: Vec<DownloadItem>) -> Self {
+        let mut directories = Vec::new();
+        let mut files = Vec::new();
+
+        for item in items {
+            if item.is_directory() {
+                directories.push(item);
+            } else {
+                files.push(item);
+            }
+        }
+
+        tracing::info!(
+            "Found {} directories and {} files to download.",
+            directories.len(),
+            files.len()
+        );
+
+        Self { directories, files }
+    }
 }

@@ -9,7 +9,7 @@ use progress::ProgressManager;
 use std::sync::Arc;
 use steam_vent_cdn::{
     CdnDownloader, Config, Credentials, Result, RetryPolicy, ServerMode, SteamVentError,
-    WorkshopError, classify_items,
+    WorkshopError,
 };
 use tracing_subscriber::Layer;
 use tracing_subscriber::prelude::*;
@@ -157,26 +157,24 @@ pub async fn run_download_pipeline(
         .join(args.item_id.to_string())
         .join(timestamp.to_string());
 
-    let (directories, files) = classify_items(items);
-
     if args.list {
-        ui::display_file_list(args.item_id, &files);
+        ui::display_file_list(args.item_id, &items.files);
         return Ok(());
     }
 
-    for dir in directories {
+    for dir in items.directories {
         let output_path = base_path.join(&dir.filename);
 
         tokio::fs::create_dir_all(&output_path).await?;
     }
 
-    let progress = ProgressManager::new(multi, &files);
+    let progress = ProgressManager::new(multi, &items.files);
     let progress = Arc::new(progress);
 
     let pipeline = downloader.create_pipeline(progress.clone());
 
     let mut tasks = tokio::task::JoinSet::new();
-    for file in &files {
+    for file in &items.files {
         let pipeline = pipeline.clone();
         let base = base_path.clone();
         let file = file.clone();

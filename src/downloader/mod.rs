@@ -8,7 +8,7 @@ pub mod sequential;
 
 pub use cdn::DepotContext;
 pub use client::CdnDownloader;
-pub use item::{ChunkInfo, DownloadItem, classify_items};
+pub use item::{ChunkInfo, DownloadItem, ManifestItems};
 pub use progress::ProgressCallback;
 pub use random_access::CdnRandomAccessReader;
 pub use sequential::{DownloadPipeline, FileByteStream};

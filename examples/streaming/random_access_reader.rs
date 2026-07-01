@@ -6,7 +6,7 @@
 use std::io::SeekFrom;
 use std::sync::Arc;
 
-use steam_vent_cdn::{CdnDownloader, Config, ProgressCallback, SteamClient, classify_items};
+use steam_vent_cdn::{CdnDownloader, Config, ProgressCallback, SteamClient};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 #[tokio::main]
@@ -38,9 +38,9 @@ async fn main() -> anyhow::Result<()> {
     let items = downloader
         .fetch_manifest_info(item_id, latest.manifest_id)
         .await?;
-    let (_, files) = classify_items(items);
 
-    let file = files
+    let file = items
+        .files
         .into_iter()
         .find(|f| f.filename == filename)
         .ok_or_else(|| anyhow::anyhow!("File '{}' not found in manifest", filename))?;
