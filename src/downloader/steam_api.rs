@@ -46,11 +46,7 @@ impl From<PublishedFileDetails> for ItemDetails {
             time_created: details.time_created,
             time_updated: details.time_updated,
             creator: details.creator,
-            tags: details
-                .tags
-                .into_iter()
-                .filter_map(|t| t.tag)
-                .collect(),
+            tags: details.tags.into_iter().filter_map(|t| t.tag).collect(),
         }
     }
 }

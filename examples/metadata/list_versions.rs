@@ -28,8 +28,8 @@ async fn main() -> anyhow::Result<()> {
 
     println!("Found {} version(s):", versions.len());
     for version in versions {
-        let dt = DateTime::from_timestamp(version.timestamp as i64, 0)
-            .unwrap_or(DateTime::UNIX_EPOCH);
+        let dt =
+            DateTime::from_timestamp(version.timestamp as i64, 0).unwrap_or(DateTime::UNIX_EPOCH);
         println!(
             "  timestamp={}  manifest_id={}  date={}  description={}",
             version.timestamp, version.manifest_id, dt, version.description

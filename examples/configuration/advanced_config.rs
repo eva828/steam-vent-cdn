@@ -7,9 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use steam_vent_cdn::{
-    CdnDownloader, Config, Credentials, RetryPolicy, ServerMode, SteamClient,
-};
+use steam_vent_cdn::{CdnDownloader, Config, Credentials, RetryPolicy, ServerMode, SteamClient};
 
 #[path = "../_common.rs"]
 mod common;

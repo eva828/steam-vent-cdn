@@ -17,9 +17,7 @@ mod common;
 async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 3 {
-        eprintln!(
-            "Usage: cargo run --example download_manifest_by_id -- <APP_ID> <MANIFEST_ID>"
-        );
+        eprintln!("Usage: cargo run --example download_manifest_by_id -- <APP_ID> <MANIFEST_ID>");
         std::process::exit(1);
     }
 
