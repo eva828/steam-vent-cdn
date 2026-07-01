@@ -4,8 +4,6 @@ use reqwest::Client as HttpClient;
 
 use super::servers::{CdnServerList, RoundRobin};
 
-/// HTTP fetcher for CDN content downloads.
-/// Handles low-level HTTP operations for manifest and chunk downloads.
 #[derive(Clone)]
 pub(crate) struct HttpFetcher {
     http_client: HttpClient,

@@ -13,7 +13,6 @@ pub use progress::ProgressCallback;
 pub use random_access::CdnRandomAccessReader;
 pub use sequential::{DownloadPipeline, FileByteStream};
 
-// VersionInfo is used by CLI, so re-export it
 pub use steam_api::VersionInfo;
 
 pub(crate) mod archive;

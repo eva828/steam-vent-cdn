@@ -9,12 +9,6 @@ use crate::downloader::item::DownloadItem;
 use crate::downloader::sequential::models::{DecodedChunk, RawChunk};
 use crate::error::{Result, SteamVentError};
 
-/// Spawn one tokio task per chunk to download it from CDN.
-///
-/// All spawned tasks share `download_sem` to limit the total number of
-/// concurrent HTTP requests.  The function returns immediately after
-/// spawning; the last task to finish will drop the final clone of
-/// `download_tx`, closing the channel.
 pub(crate) fn spawn_chunk_downloads(
     http_fetcher: &HttpFetcher,
     download_sem: &Arc<tokio::sync::Semaphore>,
@@ -77,8 +71,6 @@ pub(crate) fn spawn_chunk_downloads(
     }
 }
 
-/// Receive downloaded [`RawChunk`]s, decrypt + decompress them on the rayon
-/// thread pool, and forward the results as [`DecodedChunk`]s.
 pub(crate) async fn run_decode_loop(
     mut download_rx: tokio::sync::mpsc::Receiver<Result<RawChunk>>,
     decoded_tx: tokio::sync::mpsc::Sender<Result<DecodedChunk>>,
@@ -125,12 +117,6 @@ pub(crate) async fn run_decode_loop(
     }
 }
 
-/// Receive decoded (but potentially out-of-order) [`DecodedChunk`]s and
-/// re-emit their data in sequential offset order as `Vec<u8>` directly to
-/// the output channel.
-///
-/// Uses a [`BTreeMap`] to buffer out-of-order chunks and flushes them as
-/// soon as they become contiguous.
 pub(crate) async fn run_reassembly_loop(
     mut decoded_rx: tokio::sync::mpsc::Receiver<Result<DecodedChunk>>,
     output_tx: tokio::sync::mpsc::Sender<Result<Vec<u8>>>,
@@ -146,7 +132,6 @@ pub(crate) async fn run_reassembly_loop(
         match result {
             Ok(chunk) => {
                 if chunk.chunk_offset == next_offset {
-                    // This chunk is the next expected one — emit immediately.
                     let len = chunk.data.len() as u64;
                     next_offset += len;
                     chunks_emitted += 1;
@@ -156,7 +141,6 @@ pub(crate) async fn run_reassembly_loop(
                         return;
                     }
 
-                    // Flush any subsequent pending chunks that are now contiguous.
                     while let Some(entry) = pending.first_entry() {
                         if *entry.key() != next_offset {
                             break;
@@ -172,7 +156,6 @@ pub(crate) async fn run_reassembly_loop(
                         }
                     }
                 } else {
-                    // Out-of-order chunk — buffer it.
                     pending.insert(chunk.chunk_offset, chunk.data);
                 }
             }
@@ -184,7 +167,6 @@ pub(crate) async fn run_reassembly_loop(
         }
     }
 
-    // Channel closed — check for incomplete file.
     if chunks_emitted < total_chunks {
         let received = chunks_emitted + pending.len();
         tracing::warn!(

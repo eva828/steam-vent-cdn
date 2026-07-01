@@ -206,7 +206,6 @@ impl DownloadManifest {
             let filename = mapping.filename.take().ok_or_else(|| {
                 SteamVentError::Manifest(ManifestError::MissingField("mapping.filename"))
             })?;
-            // Normalize Windows-style path separators to Unix-style.
             let filename = filename.replace('\\', "/");
             let chunks: Vec<ChunkInfo> = mapping
                 .chunks
@@ -336,7 +335,6 @@ impl CdnDownloader {
         Ok(DownloadManifest { manifest, depot })
     }
 
-    /// Fetch the latest manifest ID for a workshop item.
     pub async fn fetch_latest_manifest_id(&mut self, item_id: u64) -> Result<u64> {
         let details = self.fetch_item_details(item_id).await?;
         details
@@ -344,7 +342,6 @@ impl CdnDownloader {
             .ok_or_else(|| SteamVentError::Workshop(WorkshopError::MissingManifestId))
     }
 
-    /// Fetch manifest info for a specific manifest ID.
     pub async fn fetch_manifest_info(
         &mut self,
         item_id: u64,

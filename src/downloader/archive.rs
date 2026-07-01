@@ -87,9 +87,6 @@ impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
             ));
         }
 
-        // Reserved bytes at offset 3-6 should be zero; we skip validation.
-
-        // Verify footer ends with 'zv' (last 2 bytes)
         let footer_zv = &self.data[self.data.len() - 2..];
         if footer_zv != b"zv" {
             return Err(SteamVentError::Compression(
@@ -97,7 +94,6 @@ impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
             ));
         }
 
-        // Uncompressed size from footer: bytes [len-6..len-2] (little endian)
         let uncompressed_size_bytes = &self.data[self.data.len() - 6..self.data.len() - 2];
         let uncompressed_size =
             u32::from_le_bytes(uncompressed_size_bytes.try_into().map_err(|_| {
@@ -106,7 +102,6 @@ impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
                 ))
             })?) as usize;
 
-        // Compressed data: from offset 12 to len - 10
         let compressed_end = self.data.len() - 10;
 
         let mut decompressed = Vec::with_capacity(uncompressed_size);
@@ -115,10 +110,6 @@ impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
             lzma_rs::decompress::UnpackedSize::UseProvided(Some(uncompressed_size as u64));
         options.unpacked_size = unpacked_size;
 
-        // In VZa format, the properties and dictionary size (5 bytes) are at offset 7,
-        // followed immediately by the compressed stream at offset 12.
-        // We can pass this contiguous slice directly to the decompressor with the
-        // uncompressed size set in options, entirely avoiding `std::io::Chain`.
         let mut reader = Cursor::new(&self.data[7..compressed_end]);
 
         if let Err(e) =
@@ -186,8 +177,6 @@ impl<'a> ArchiveExtractor for RawArchiveExtractor<'a> {
     }
 }
 
-/// Steamのチャンクデータの状態を表すenum
-/// Encrypted → Decrypted → Decompressed と状態遷移していく
 #[derive(Debug)]
 pub enum SteamChunk {
     Encrypted(Vec<u8>),
@@ -196,20 +185,16 @@ pub enum SteamChunk {
 }
 
 impl SteamChunk {
-    /// 新規作成
     pub fn new(data: Vec<u8>) -> Self {
         Self::Encrypted(data)
     }
 
-    /// データを所有権として取得
     pub fn into_vec(self) -> Vec<u8> {
         match self {
             Self::Encrypted(v) | Self::Decrypted(v) | Self::Decompressed(v) => v,
         }
     }
 
-    /// Encrypted → Decrypted
-    /// 想定外の状態の場合はエラー
     pub fn decrypt(self, key: Option<&[u8]>) -> Result<Self> {
         match self {
             Self::Encrypted(data) => {
@@ -217,7 +202,6 @@ impl SteamChunk {
                     let decrypted = Self::perform_decrypt(&data, k)?;
                     Ok(Self::Decrypted(decrypted))
                 } else {
-                    // キーがない場合はそのままDecryptedに移行
                     Ok(Self::Decrypted(data))
                 }
             }
@@ -236,7 +220,6 @@ impl SteamChunk {
         }
     }
 
-    /// Decrypted → Decompressed（整合性検証付き）
     pub fn decompress_and_verify(
         self,
         expected_uncompressed_size: u32,
@@ -247,7 +230,6 @@ impl SteamChunk {
                 let extractor = Self::get_extractor(&data)?;
                 let decompressed = extractor.extract()?;
 
-                // Verify uncompressed size matches manifest's cb_original
                 let actual_size = decompressed.len() as u32;
                 if actual_size != expected_uncompressed_size {
                     return Err(SteamVentError::Chunk(
@@ -258,7 +240,6 @@ impl SteamChunk {
                     ));
                 }
 
-                // Verify Adler32 checksum matches manifest's crc
                 let mut hasher = adler::Adler32::from_checksum(0);
                 hasher.write_slice(&decompressed);
                 let actual_crc = hasher.checksum();
@@ -288,7 +269,6 @@ impl SteamChunk {
         }
     }
 
-    /// 実際の復号処理
     fn perform_decrypt(data: &[u8], key: &[u8]) -> Result<Vec<u8>> {
         if data.len() < 16 {
             return Ok(data.to_vec());

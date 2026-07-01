@@ -46,14 +46,6 @@ impl CdnDownloader {
         Ok(details_resp.publishedfiledetails[0].clone())
     }
 
-    /// Fetch a specific range of the change history for a workshop item.
-    ///
-    /// For fetching all versions, see [`fetch_all_change_history`].
-    ///
-    /// # Arguments
-    ///
-    /// * `item_id` - The Steam Workshop item ID
-    /// * `range` - The range of versions to fetch (e.g., `0..100`)
     pub async fn fetch_change_history(
         &mut self,
         item_id: u64,
@@ -106,14 +98,6 @@ impl CdnDownloader {
         Ok(versions)
     }
 
-    /// Fetch all change history for a workshop item.
-    ///
-    /// This method automatically handles pagination to fetch all available versions
-    /// by making multiple API calls if necessary.
-    ///
-    /// # Arguments
-    ///
-    /// * `item_id` - The Steam Workshop item ID
     pub async fn fetch_all_change_history(&mut self, item_id: u64) -> Result<Vec<VersionInfo>> {
         let mut all_versions = Vec::new();
         let mut start_index = 0u32;
@@ -130,7 +114,6 @@ impl CdnDownloader {
 
             all_versions.extend(versions);
 
-            // If we got fewer than 100 items, we've reached the end
             if count < 100 {
                 break;
             }

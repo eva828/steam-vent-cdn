@@ -10,10 +10,8 @@ use crate::downloader::item::ChunkInfo;
 use crate::downloader::progress::ProgressCallback;
 use crate::error::{CdnError, Result, SteamVentError};
 
-/// チャンクフェッチ操作の Future 型エイリアス
 pub(crate) type ChunkFetchFuture = Pin<Box<dyn Future<Output = Result<(usize, Vec<u8>)>> + Send>>;
 
-/// 指定チャンクをダウンロード→復号→展開する非同期処理を構築する。
 pub(crate) fn build_fetch_future(
     chunk_idx: usize,
     chunk: &ChunkInfo,
@@ -33,7 +31,6 @@ pub(crate) fn build_fetch_future(
     let download_sem = Arc::clone(download_sem);
 
     Box::pin(async move {
-        // セマフォ取得（他の Reader や DownloadPipeline と帯域を共有）
         let _permit = download_sem
             .acquire()
             .await
@@ -49,7 +46,6 @@ pub(crate) fn build_fetch_future(
 
         progress.on_download_progress(compressed_size as u64);
 
-        // 復号→展開は CPU ヘビーなので rayon で行う
         let (tx, rx) = tokio::sync::oneshot::channel();
 
         rayon::spawn(move || {

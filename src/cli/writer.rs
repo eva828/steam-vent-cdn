@@ -5,7 +5,6 @@ use tokio::io::AsyncWriteExt;
 
 use steam_vent_cdn::{FileByteStream, Result};
 
-/// Consume a [`FileByteStream`] and write the file to disk under `base_path`.
 pub async fn write_file(stream: &mut FileByteStream, base_path: &Path) -> Result<()> {
     let file_path = base_path.join(&stream.filename);
     if let Some(p) = file_path.parent() {
