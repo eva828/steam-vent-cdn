@@ -6,7 +6,7 @@
 use std::io::SeekFrom;
 use std::sync::Arc;
 
-use steam_vent_cdn::{CdnDownloader, Config, ProgressCallback, SteamClient};
+use steam_vent_cdn::{CdnDownloader, Config, SteamClient};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 #[path = "../_common.rs"]

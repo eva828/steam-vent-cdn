@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use futures::StreamExt;
-use steam_vent_cdn::{CdnDownloader, Config, ProgressCallback, SteamClient};
+use steam_vent_cdn::{CdnDownloader, Config, SteamClient};
 
 #[path = "../_common.rs"]
 mod common;
