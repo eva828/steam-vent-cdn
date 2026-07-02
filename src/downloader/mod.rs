@@ -15,4 +15,4 @@ pub use sequential::{DownloadPipeline, FileByteStream};
 pub use steam_api::{ItemDetails, VersionInfo};
 
 pub(crate) mod archive;
-pub(crate) mod steam_api;
+pub mod steam_api;

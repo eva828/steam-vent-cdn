@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum SteamSessionError {
     #[error("Steam server discovery failed: {0}")]
     ServerDiscovery(#[from] steam_vent::ServerDiscoveryError),
@@ -22,6 +23,7 @@ impl From<steam_vent::NetworkError> for SteamSessionError {
 }
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum CdnError {
     #[error("No CDN servers available")]
     NoServers,
@@ -56,6 +58,7 @@ pub enum CdnError {
 }
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum CompressionError {
     #[error("Zstd decompression failed")]
     Zstd(#[from] std::io::Error),
@@ -71,6 +74,7 @@ pub enum CompressionError {
 }
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum ChunkError {
     #[error("Chunk size mismatch: expected {expected} bytes, got {actual} bytes")]
     SizeMismatch { expected: u32, actual: u32 },
@@ -86,6 +90,7 @@ pub enum ChunkError {
 }
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum EncryptionError {
     #[error("Key initialization failed")]
     KeyInit(#[source] aes::cipher::InvalidLength),
@@ -101,6 +106,7 @@ pub enum EncryptionError {
 }
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum ManifestError {
     #[error("Failed to decode manifest: {0}")]
     Decode(String),
@@ -119,6 +125,7 @@ pub enum ManifestError {
 }
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum WorkshopError {
     #[error("Item details for {0} is missing or empty")]
     ItemDetailsMissing(u64),
@@ -140,6 +147,7 @@ pub enum WorkshopError {
 }
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum SteamVentError {
     #[error("Steam session error")]
     SteamSession(#[from] SteamSessionError),

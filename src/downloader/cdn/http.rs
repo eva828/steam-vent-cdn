@@ -11,7 +11,7 @@ pub(crate) struct HttpFetcher {
 }
 
 impl HttpFetcher {
-    pub fn new(config: Config) -> Result<Self> {
+    pub(crate) fn new(config: Config) -> Result<Self> {
         let http_client = HttpClient::builder()
             .timeout(config.timeout)
             .http2_prior_knowledge()
@@ -28,7 +28,7 @@ impl HttpFetcher {
         })
     }
 
-    pub async fn download_manifest(
+    pub(crate) async fn download_manifest(
         &self,
         servers: &CdnServerList,
         depot_id: u32,
@@ -85,7 +85,7 @@ impl HttpFetcher {
         Err(SteamVentError::Cdn(CdnError::AllServersFailed))
     }
 
-    pub async fn download_chunk(
+    pub(crate) async fn download_chunk(
         &self,
         servers: &RoundRobin<'_>,
         depot_id: u32,

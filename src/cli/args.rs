@@ -1,5 +1,5 @@
 use clap::Parser;
-use steam_vent_cdn::ServerMode;
+use steam_vent_cdn::config::ServerMode;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]

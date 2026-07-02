@@ -1,4 +1,4 @@
-use crate::error::{CompressionError, EncryptionError, Result, SteamVentError};
+use crate::error::{ChunkError, CompressionError, EncryptionError, Result, SteamVentError};
 use aes::Aes256;
 use aes::cipher::{BlockDecrypt, KeyInit};
 use cbc::cipher::{BlockDecryptMut, KeyIvInit};
@@ -17,7 +17,7 @@ pub(crate) struct ZipArchiveExtractor<'a> {
 impl<'a> ZipArchiveExtractor<'a> {
     pub const MAGIC: &'static [u8] = b"PK\x03\x04";
 
-    pub fn new(data: &'a [u8]) -> Result<Self> {
+    pub(crate) fn new(data: &'a [u8]) -> Result<Self> {
         Ok(Self { data })
     }
 }
@@ -45,7 +45,7 @@ pub(crate) struct ZstdArchiveExtractor<'a> {
 impl<'a> ZstdArchiveExtractor<'a> {
     pub const MAGIC: &'static [u8] = b"VSZa";
 
-    pub fn new(data: &'a [u8]) -> Result<Self> {
+    pub(crate) fn new(data: &'a [u8]) -> Result<Self> {
         Ok(Self { data })
     }
 }
@@ -74,7 +74,7 @@ pub(crate) struct VZaArchiveExtractor<'a> {
 impl<'a> VZaArchiveExtractor<'a> {
     pub const MAGIC: &'static [u8] = b"VZa";
 
-    pub fn new(data: &'a [u8]) -> Result<Self> {
+    pub(crate) fn new(data: &'a [u8]) -> Result<Self> {
         Ok(Self { data })
     }
 }
@@ -135,7 +135,7 @@ pub(crate) struct LzmaArchiveExtractor<'a> {
 impl<'a> LzmaArchiveExtractor<'a> {
     pub const MAGIC: &'static [u8] = &[0x5D, 0x00, 0x00, 0x80, 0x00];
 
-    pub fn new(data: &'a [u8], offset: usize) -> Result<Self> {
+    pub(crate) fn new(data: &'a [u8], offset: usize) -> Result<Self> {
         Ok(Self { data, offset })
     }
 }
@@ -160,7 +160,7 @@ pub(crate) struct RawArchiveExtractor<'a> {
 }
 
 impl<'a> RawArchiveExtractor<'a> {
-    pub fn new(data: &'a [u8]) -> Result<Self> {
+    pub(crate) fn new(data: &'a [u8]) -> Result<Self> {
         Ok(Self { data })
     }
 }
@@ -178,24 +178,24 @@ impl<'a> ArchiveExtractor for RawArchiveExtractor<'a> {
 }
 
 #[derive(Debug)]
-pub enum SteamChunk {
+pub(crate) enum SteamChunk {
     Encrypted(Vec<u8>),
     Decrypted(Vec<u8>),
     Decompressed(Vec<u8>),
 }
 
 impl SteamChunk {
-    pub fn new(data: Vec<u8>) -> Self {
+    pub(crate) fn new(data: Vec<u8>) -> Self {
         Self::Encrypted(data)
     }
 
-    pub fn into_vec(self) -> Vec<u8> {
+    pub(crate) fn into_vec(self) -> Vec<u8> {
         match self {
             Self::Encrypted(v) | Self::Decrypted(v) | Self::Decompressed(v) => v,
         }
     }
 
-    pub fn decrypt(self, key: Option<&[u8]>) -> Result<Self> {
+    pub(crate) fn decrypt(self, key: Option<&[u8]>) -> Result<Self> {
         match self {
             Self::Encrypted(data) => {
                 if let Some(k) = key {
@@ -205,22 +205,18 @@ impl SteamChunk {
                     Ok(Self::Decrypted(data))
                 }
             }
-            Self::Decrypted(_) => Err(SteamVentError::Chunk(
-                crate::error::ChunkError::UnexpectedState {
-                    expected: "Encrypted",
-                    actual: "Decrypted",
-                },
-            )),
-            Self::Decompressed(_) => Err(SteamVentError::Chunk(
-                crate::error::ChunkError::UnexpectedState {
-                    expected: "Encrypted",
-                    actual: "Decompressed",
-                },
-            )),
+            Self::Decrypted(_) => Err(SteamVentError::Chunk(ChunkError::UnexpectedState {
+                expected: "Encrypted",
+                actual: "Decrypted",
+            })),
+            Self::Decompressed(_) => Err(SteamVentError::Chunk(ChunkError::UnexpectedState {
+                expected: "Encrypted",
+                actual: "Decompressed",
+            })),
         }
     }
 
-    pub fn decompress_and_verify(
+    pub(crate) fn decompress_and_verify(
         self,
         expected_uncompressed_size: u32,
         expected_crc: u32,
@@ -232,40 +228,32 @@ impl SteamChunk {
 
                 let actual_size = decompressed.len() as u32;
                 if actual_size != expected_uncompressed_size {
-                    return Err(SteamVentError::Chunk(
-                        crate::error::ChunkError::SizeMismatch {
-                            expected: expected_uncompressed_size,
-                            actual: actual_size,
-                        },
-                    ));
+                    return Err(SteamVentError::Chunk(ChunkError::SizeMismatch {
+                        expected: expected_uncompressed_size,
+                        actual: actual_size,
+                    }));
                 }
 
                 let mut hasher = adler::Adler32::from_checksum(0);
                 hasher.write_slice(&decompressed);
                 let actual_crc = hasher.checksum();
                 if actual_crc != expected_crc {
-                    return Err(SteamVentError::Chunk(
-                        crate::error::ChunkError::ChecksumMismatch {
-                            expected: expected_crc,
-                            actual: actual_crc,
-                        },
-                    ));
+                    return Err(SteamVentError::Chunk(ChunkError::ChecksumMismatch {
+                        expected: expected_crc,
+                        actual: actual_crc,
+                    }));
                 }
 
                 Ok(Self::Decompressed(decompressed))
             }
-            Self::Encrypted(_) => Err(SteamVentError::Chunk(
-                crate::error::ChunkError::UnexpectedState {
-                    expected: "Decrypted",
-                    actual: "Encrypted",
-                },
-            )),
-            Self::Decompressed(_) => Err(SteamVentError::Chunk(
-                crate::error::ChunkError::UnexpectedState {
-                    expected: "Decrypted",
-                    actual: "Decompressed",
-                },
-            )),
+            Self::Encrypted(_) => Err(SteamVentError::Chunk(ChunkError::UnexpectedState {
+                expected: "Decrypted",
+                actual: "Encrypted",
+            })),
+            Self::Decompressed(_) => Err(SteamVentError::Chunk(ChunkError::UnexpectedState {
+                expected: "Decrypted",
+                actual: "Decompressed",
+            })),
         }
     }
 

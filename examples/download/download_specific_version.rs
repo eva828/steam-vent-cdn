@@ -6,7 +6,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use steam_vent_cdn::{CdnDownloader, Config, SteamClient, SteamVentError, WorkshopError};
+use steam_vent_cdn::config::Config;
+use steam_vent_cdn::connection::SteamClient;
+use steam_vent_cdn::downloader::client::CdnDownloader;
+use steam_vent_cdn::error::{SteamVentError, WorkshopError};
 
 #[path = "../_common.rs"]
 mod common;

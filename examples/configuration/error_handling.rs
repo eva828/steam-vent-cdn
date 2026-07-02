@@ -3,7 +3,10 @@
 //! Usage:
 //!     cargo run --example error_handling -- <APP_ID> <ITEM_ID>
 
-use steam_vent_cdn::{CdnDownloader, Config, SteamClient, SteamVentError};
+use steam_vent_cdn::config::Config;
+use steam_vent_cdn::connection::SteamClient;
+use steam_vent_cdn::downloader::client::CdnDownloader;
+use steam_vent_cdn::error::SteamVentError;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

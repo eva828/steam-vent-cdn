@@ -1,4 +1,5 @@
 use crate::downloader::cdn::HttpFetcher;
+use crate::downloader::progress::ProgressCallback;
 use crate::error::Result;
 use futures::Stream;
 use std::pin::Pin;
@@ -57,6 +58,6 @@ impl Stream for FileByteStream {
 pub struct DownloadPipeline {
     pub(crate) http_fetcher: HttpFetcher,
     pub(crate) download_sem: Arc<tokio::sync::Semaphore>,
-    pub(crate) progress: Arc<dyn crate::downloader::ProgressCallback>,
+    pub(crate) progress: Arc<dyn ProgressCallback>,
     pub(crate) parallel_download: usize,
 }

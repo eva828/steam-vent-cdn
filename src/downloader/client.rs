@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use crate::connection::SteamSession;
-use crate::downloader::cdn::{CdnServerList, HttpFetcher};
+use crate::downloader::cdn::http::HttpFetcher;
+use crate::downloader::cdn::servers::CdnServerList;
 use crate::downloader::manifest::ManifestEntry;
 use crate::downloader::random_access::CdnRandomAccessReader;
 use crate::downloader::{DownloadPipeline, ProgressCallback};

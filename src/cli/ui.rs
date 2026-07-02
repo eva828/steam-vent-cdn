@@ -1,4 +1,5 @@
-use steam_vent_cdn::{ManifestEntry, VersionInfo};
+use steam_vent_cdn::downloader::manifest::ManifestEntry;
+use steam_vent_cdn::downloader::steam_api::VersionInfo;
 
 fn format_timestamp(timestamp: u32) -> String {
     use chrono::{DateTime, Utc};

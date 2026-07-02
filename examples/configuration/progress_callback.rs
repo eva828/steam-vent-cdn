@@ -7,7 +7,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use steam_vent_cdn::{CdnDownloader, Config, ProgressCallback, SteamClient};
+use steam_vent_cdn::config::Config;
+use steam_vent_cdn::connection::SteamClient;
+use steam_vent_cdn::downloader::client::CdnDownloader;
+use steam_vent_cdn::downloader::progress::ProgressCallback;
 
 #[path = "../_common.rs"]
 mod common;

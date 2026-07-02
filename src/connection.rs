@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::{Config, Credentials};
 use crate::error::{Result, SteamSessionError, SteamVentError};
 
 use steam_vent::ServerList;
@@ -10,8 +10,8 @@ pub struct SteamClient {
 }
 
 pub struct SteamSession {
-    pub connection: Connection,
-    config: crate::config::Config,
+    connection: Connection,
+    config: Config,
 }
 
 impl SteamClient {
@@ -25,13 +25,13 @@ impl SteamClient {
             .map_err(SteamSessionError::ServerDiscovery)?;
 
         let mut connection = match &self.config.credentials {
-            crate::config::Credentials::Anonymous => {
+            Credentials::Anonymous => {
                 tracing::info!("Connecting anonymously to Steam");
                 Connection::anonymous(&server_list).await.map_err(|e| {
                     SteamVentError::SteamSession(SteamSessionError::SessionInit(e.to_string()))
                 })?
             }
-            crate::config::Credentials::UserPass { username, password } => {
+            Credentials::UserPass { username, password } => {
                 tracing::info!("Logging in as {}", username);
                 let auth_handler = UserProvidedAuthConfirmationHandler::new(
                     tokio::io::stdin(),
@@ -58,7 +58,7 @@ impl SteamClient {
 }
 
 impl SteamSession {
-    pub fn connection_mut(&mut self) -> &mut Connection {
+    pub(crate) fn connection_mut(&mut self) -> &mut Connection {
         &mut self.connection
     }
 

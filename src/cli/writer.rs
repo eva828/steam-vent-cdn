@@ -3,7 +3,8 @@ use std::path::Path;
 use futures::StreamExt;
 use tokio::io::AsyncWriteExt;
 
-use steam_vent_cdn::{FileByteStream, Result};
+use steam_vent_cdn::downloader::sequential::FileByteStream;
+use steam_vent_cdn::error::Result;
 
 pub async fn write_file(stream: &mut FileByteStream, base_path: &Path) -> Result<()> {
     let file_path = base_path.join(&stream.filename);

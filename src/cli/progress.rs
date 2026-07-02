@@ -1,6 +1,7 @@
 use indicatif::MultiProgress;
 use std::time::Instant;
-use steam_vent_cdn::{ManifestEntry, ProgressCallback};
+use steam_vent_cdn::downloader::manifest::ManifestEntry;
+use steam_vent_cdn::downloader::progress::ProgressCallback;
 
 pub struct ProgressManager {
     pb_download: indicatif::ProgressBar,

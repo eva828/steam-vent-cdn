@@ -2,7 +2,9 @@ mod cli;
 
 use clap::Parser;
 use cli::Args;
-use steam_vent_cdn::{CdnDownloader, Result, SteamClient};
+use steam_vent_cdn::connection::SteamClient;
+use steam_vent_cdn::downloader::client::CdnDownloader;
+use steam_vent_cdn::error::Result;
 
 #[tokio::main]
 async fn main() -> Result<()> {

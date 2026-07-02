@@ -3,7 +3,9 @@
 //! Usage:
 //!     cargo run --example list_files -- <APP_ID> <ITEM_ID>
 
-use steam_vent_cdn::{CdnDownloader, Config, SteamClient};
+use steam_vent_cdn::config::Config;
+use steam_vent_cdn::connection::SteamClient;
+use steam_vent_cdn::downloader::client::CdnDownloader;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

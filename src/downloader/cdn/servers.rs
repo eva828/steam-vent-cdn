@@ -22,7 +22,7 @@ struct ServerHealth {
 }
 
 #[derive(Debug, Clone)]
-pub struct CdnServer {
+pub(crate) struct CdnServer {
     pub vhost: String,
     pub server_type: String,
     pub weighted_load: f32,
@@ -38,7 +38,7 @@ pub struct DepotContext {
 }
 
 #[derive(Debug, Clone)]
-pub struct CdnServerList {
+pub(crate) struct CdnServerList {
     cache: Vec<CdnServer>,
     cdn: Vec<CdnServer>,
     cursor: Arc<AtomicUsize>,
@@ -46,7 +46,7 @@ pub struct CdnServerList {
     server_mode: ServerMode,
 }
 
-pub struct RoundRobin<'a> {
+pub(crate) struct RoundRobin<'a> {
     list: &'a CdnServerList,
 }
 
@@ -76,7 +76,7 @@ fn blacklist_timeout(count: u32) -> Duration {
 }
 
 impl CdnServerList {
-    pub async fn discover(client: &mut SteamSession) -> Result<Self> {
+    pub(crate) async fn discover(client: &mut SteamSession) -> Result<Self> {
         tracing::debug!("Finding CDN servers (cell_id={})", DEFAULT_CELL_ID);
 
         let srv_req = CContentServerDirectory_GetServersForSteamPipe_Request {
@@ -114,7 +114,7 @@ impl CdnServerList {
         Ok(Self::sorted(servers, server_mode))
     }
 
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::with_server_mode(ServerMode::default())
     }
 
@@ -128,7 +128,7 @@ impl CdnServerList {
         }
     }
 
-    pub fn sorted(mut servers: Vec<CdnServer>, server_mode: ServerMode) -> Self {
+    pub(crate) fn sorted(mut servers: Vec<CdnServer>, server_mode: ServerMode) -> Self {
         sort_by_load(&mut servers);
 
         let (cache, cdn): (Vec<_>, Vec<_>) = servers
@@ -164,7 +164,7 @@ impl CdnServerList {
         }
     }
 
-    pub async fn resolve(&mut self, session: &mut SteamSession) -> Result<()> {
+    pub(crate) async fn resolve(&mut self, session: &mut SteamSession) -> Result<()> {
         if !self.is_empty() {
             return Ok(());
         }
@@ -172,7 +172,7 @@ impl CdnServerList {
         Ok(())
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         match self.server_mode {
             ServerMode::Cdn => self.cdn.is_empty(),
             ServerMode::Cache => self.cache.is_empty(),
@@ -180,7 +180,7 @@ impl CdnServerList {
         }
     }
 
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         match self.server_mode {
             ServerMode::Cdn => self.cdn.len(),
             ServerMode::Cache => self.cache.len(),
@@ -188,7 +188,7 @@ impl CdnServerList {
         }
     }
 
-    pub fn report_success(&self, server_host: &str) {
+    pub(crate) fn report_success(&self, server_host: &str) {
         let mut health = self.health.lock().unwrap();
         if let Some(h) = health.get_mut(server_host) {
             h.consecutive_failures = 0;
@@ -198,7 +198,7 @@ impl CdnServerList {
         }
     }
 
-    pub fn report_failure(&self, server_host: &str) {
+    pub(crate) fn report_failure(&self, server_host: &str) {
         let mut health = self.health.lock().unwrap();
         let h = health.entry(server_host.to_string()).or_default();
         h.consecutive_failures += 1;
@@ -216,12 +216,12 @@ impl CdnServerList {
         }
     }
 
-    pub fn is_healthy(&self, server_host: &str) -> bool {
+    pub(crate) fn is_healthy(&self, server_host: &str) -> bool {
         let health = self.health.lock().unwrap();
         self.is_server_healthy(&health, server_host)
     }
 
-    pub fn healthy_count(&self) -> usize {
+    pub(crate) fn healthy_count(&self) -> usize {
         let health = self.health.lock().unwrap();
         self.cache
             .iter()
@@ -246,7 +246,7 @@ impl CdnServerList {
             .unwrap_or(true)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &str> + '_ {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &str> + '_ {
         let iter: Box<dyn Iterator<Item = &CdnServer> + '_> = match self.server_mode {
             ServerMode::Cdn => Box::new(self.cdn.iter()),
             ServerMode::Cache => Box::new(self.cache.iter()),
@@ -263,15 +263,15 @@ impl Default for CdnServerList {
 }
 
 impl<'a> RoundRobin<'a> {
-    pub fn new(list: &'a CdnServerList) -> Self {
+    pub(crate) fn new(list: &'a CdnServerList) -> Self {
         Self { list }
     }
 
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.list.len()
     }
 
-    pub fn next(&self) -> Result<&str> {
+    pub(crate) fn next(&self) -> Result<&str> {
         let total = self.list.len();
         if total == 0 {
             return Err(SteamVentError::Cdn(CdnError::NoServers));
@@ -309,15 +309,15 @@ impl<'a> RoundRobin<'a> {
         Err(SteamVentError::Cdn(CdnError::AllServersFailed))
     }
 
-    pub fn report_success(&self, server_host: &str) {
+    pub(crate) fn report_success(&self, server_host: &str) {
         self.list.report_success(server_host);
     }
 
-    pub fn report_failure(&self, server_host: &str) {
+    pub(crate) fn report_failure(&self, server_host: &str) {
         self.list.report_failure(server_host);
     }
 
-    pub fn healthy_count(&self) -> usize {
+    pub(crate) fn healthy_count(&self) -> usize {
         self.list.healthy_count()
     }
 }

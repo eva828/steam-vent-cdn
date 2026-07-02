@@ -7,10 +7,9 @@ pub use args::Args;
 use indicatif::MultiProgress;
 use progress::ProgressManager;
 use std::sync::Arc;
-use steam_vent_cdn::{
-    CdnDownloader, Config, Credentials, Result, RetryPolicy, ServerMode, SteamVentError,
-    WorkshopError,
-};
+use steam_vent_cdn::config::{Config, Credentials, RetryPolicy, ServerMode};
+use steam_vent_cdn::downloader::client::CdnDownloader;
+use steam_vent_cdn::error::{Result, SteamVentError, WorkshopError};
 use tracing_subscriber::Layer;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -129,16 +128,17 @@ pub async fn run_download_pipeline(
     let timestamp = if let Some(ts) = args.version {
         ts
     } else {
-        versions.first().map(|v| v.timestamp).ok_or_else(|| {
-            steam_vent_cdn::SteamVentError::Workshop(WorkshopError::NoVersionsFound)
-        })?
+        versions
+            .first()
+            .map(|v| v.timestamp)
+            .ok_or_else(|| SteamVentError::Workshop(WorkshopError::NoVersionsFound))?
     };
 
     let version_info = versions
         .iter()
         .find(|v| v.timestamp == timestamp)
         .ok_or_else(|| {
-            steam_vent_cdn::SteamVentError::Workshop(WorkshopError::VersionNotFound(format!(
+            SteamVentError::Workshop(WorkshopError::VersionNotFound(format!(
                 "Timestamp {}",
                 timestamp
             )))

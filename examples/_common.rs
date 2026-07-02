@@ -3,7 +3,9 @@
 use std::path::Path;
 
 use futures::StreamExt;
-use steam_vent_cdn::{FileByteStream, ProgressCallback, Result};
+use steam_vent_cdn::downloader::progress::ProgressCallback;
+use steam_vent_cdn::downloader::sequential::FileByteStream;
+use steam_vent_cdn::error::Result;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
