@@ -96,13 +96,15 @@ impl CdnDownloader {
         history_req.set_startindex(start_index);
         history_req.set_count(count);
 
+        let config = self.steam_session.config();
+        let max_retries = config.retry_policy.max_retries;
+        let retry_delay = config.retry_policy.retry_delay;
+
         let history_resp = self
             .steam_session
             .connection_mut()
-            .service_method(history_req)
-            .await
-            .map_err(|e| SteamSessionError::ApiCallFailed(Box::new(e)))
-            .map_err(SteamVentError::SteamSession)?;
+            .service_method_with_retry(history_req, max_retries, retry_delay)
+            .await?;
 
         let versions: Vec<VersionInfo> = history_resp
             .changes
