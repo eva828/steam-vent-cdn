@@ -21,8 +21,8 @@ pub(crate) struct RawManifest {
 impl RawManifest {
     pub(crate) fn decode(payload_bytes: &[u8]) -> Result<Self> {
         let payload_bytes_vec;
-        let payload_bytes = if let Ok(extractor) = ZipArchiveExtractor::new(payload_bytes) {
-            payload_bytes_vec = extractor.extract()?;
+        let payload_bytes = if payload_bytes.starts_with(ZipArchiveExtractor::MAGIC) {
+            payload_bytes_vec = ZipArchiveExtractor::new(payload_bytes)?.extract()?;
             &payload_bytes_vec
         } else {
             payload_bytes
@@ -32,33 +32,38 @@ impl RawManifest {
         let mut metadata: Option<ContentManifestMetadata> = None;
         let mut cursor = 0;
 
-        while cursor + 8 <= payload_bytes.len() {
-            let magic = u32::from_le_bytes(payload_bytes[cursor..cursor + 4].try_into().unwrap());
-            let length =
-                u32::from_le_bytes(payload_bytes[cursor + 4..cursor + 8].try_into().unwrap())
-                    as usize;
+        fn pop_segment_header(data: &[u8]) -> Option<(u32, usize, &[u8])> {
+            let (magic_bytes, rest) = data.split_first_chunk::<4>()?;
+            let (length_bytes, rest) = rest.split_first_chunk::<4>()?;
 
+            let magic = u32::from_le_bytes(*magic_bytes);
+            let length = u32::from_le_bytes(*length_bytes) as usize;
+
+            Some((magic, length, rest))
+        }
+
+        while let Some((magic, length, data)) = pop_segment_header(payload_bytes) {
             tracing::debug!(
                 "Found manifest segment: Magic 0x{:08X}, Length {}",
                 magic,
                 length
             );
 
-            if cursor + 8 + length > payload_bytes.len() {
+            if length > data.len() {
                 tracing::error!(
                     "Segment length {} exceeds remaining data {}",
                     length,
-                    payload_bytes.len() - cursor - 8
+                    data.len()
                 );
                 return Err(SteamVentError::Manifest(
                     ManifestError::SegmentLengthExceeded {
                         length,
-                        remaining: payload_bytes.len() - cursor - 8,
+                        remaining: data.len(),
                     },
                 ));
             }
 
-            let segment_data = &payload_bytes[cursor + 8..cursor + 8 + length];
+            let (segment_data, rest) = data.split_at(length);
 
             if magic == MAGIC_PAYLOAD {
                 tracing::debug!("Processing Payload segment");
@@ -82,7 +87,7 @@ impl RawManifest {
                 ));
             }
 
-            cursor += 8 + length;
+            payload_bytes = rest;
         }
 
         if final_payload.is_empty() {
