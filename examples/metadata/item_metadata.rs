@@ -3,10 +3,11 @@
 //! Usage:
 //!     cargo run --example item_metadata -- <ITEM_ID>
 
-use chrono::DateTime;
 use steam_vent_cdn::config::Config;
 use steam_vent_cdn::connection::SteamClient;
 use steam_vent_cdn::downloader::client::CdnDownloader;
+use time::OffsetDateTime;
+use time::macros::format_description;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -35,13 +36,19 @@ async fn main() -> anyhow::Result<()> {
     println!("Preview URL: {:?}", details.preview_url);
     println!("File URL: {:?}", details.file_url);
 
+    let format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
+
     if let Some(ts) = details.time_created {
-        let dt = DateTime::from_timestamp(ts as i64, 0).unwrap_or(DateTime::UNIX_EPOCH);
-        println!("Created: {} ({})", dt, ts);
+        let dt =
+            OffsetDateTime::from_unix_timestamp(ts as i64).unwrap_or(OffsetDateTime::UNIX_EPOCH);
+        let date = dt.format(format).unwrap_or_else(|_| "Unknown".to_string());
+        println!("Created: {} ({})", date, ts);
     }
     if let Some(ts) = details.time_updated {
-        let dt = DateTime::from_timestamp(ts as i64, 0).unwrap_or(DateTime::UNIX_EPOCH);
-        println!("Updated: {} ({})", dt, ts);
+        let dt =
+            OffsetDateTime::from_unix_timestamp(ts as i64).unwrap_or(OffsetDateTime::UNIX_EPOCH);
+        let date = dt.format(format).unwrap_or_else(|_| "Unknown".to_string());
+        println!("Updated: {} ({})", date, ts);
     }
 
     println!("Creator: {:?}", details.creator);

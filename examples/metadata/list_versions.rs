@@ -3,10 +3,11 @@
 //! Usage:
 //!     cargo run --example list_versions -- <APP_ID> <ITEM_ID>
 
-use chrono::DateTime;
 use steam_vent_cdn::config::Config;
 use steam_vent_cdn::connection::SteamClient;
 use steam_vent_cdn::downloader::client::CdnDownloader;
+use time::OffsetDateTime;
+use time::macros::format_description;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -28,13 +29,16 @@ async fn main() -> anyhow::Result<()> {
 
     let versions = downloader.fetch_all_change_history(item_id).await?;
 
+    let format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
+
     println!("Found {} version(s):", versions.len());
     for version in versions {
-        let dt =
-            DateTime::from_timestamp(version.timestamp as i64, 0).unwrap_or(DateTime::UNIX_EPOCH);
+        let dt = OffsetDateTime::from_unix_timestamp(version.timestamp as i64)
+            .unwrap_or(OffsetDateTime::UNIX_EPOCH);
+        let date = dt.format(format).unwrap_or_else(|_| "Unknown".to_string());
         println!(
             "  timestamp={}  manifest_id={}  date={}  description={}",
-            version.timestamp, version.manifest_id, dt, version.description
+            version.timestamp, version.manifest_id, date, version.description
         );
     }
 

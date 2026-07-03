@@ -1,11 +1,15 @@
 use steam_vent_cdn::downloader::manifest::ManifestEntry;
 use steam_vent_cdn::downloader::steam_api::VersionInfo;
+use time::OffsetDateTime;
+use time::macros::format_description;
 
 fn format_timestamp(timestamp: u32) -> String {
-    use chrono::{DateTime, Utc};
-    let datetime = DateTime::<Utc>::from_timestamp(timestamp as i64, 0);
-    datetime
-        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+    static FORMAT: &[time::format_description::FormatItem<'static>] =
+        format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
+
+    OffsetDateTime::from_unix_timestamp(timestamp as i64)
+        .ok()
+        .and_then(|dt| dt.format(FORMAT).ok())
         .unwrap_or_else(|| "Unknown".to_string())
 }
 
