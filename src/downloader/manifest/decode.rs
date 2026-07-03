@@ -20,17 +20,11 @@ pub(crate) struct RawManifest {
 
 impl RawManifest {
     pub(crate) fn decode(payload_bytes: &[u8]) -> Result<Self> {
-        let payload_bytes_vec;
-        let payload_bytes = if payload_bytes.starts_with(ZipArchiveExtractor::MAGIC) {
-            payload_bytes_vec = ZipArchiveExtractor::new(payload_bytes)?.extract()?;
-            &payload_bytes_vec
-        } else {
-            payload_bytes
-        };
+        let payload_bytes_vec = ZipArchiveExtractor::new(payload_bytes)?.extract()?;
+        let mut payload_bytes = payload_bytes_vec.as_slice();
 
         let mut final_payload = Vec::new();
         let mut metadata: Option<ContentManifestMetadata> = None;
-        let mut cursor = 0;
 
         fn pop_segment_header(data: &[u8]) -> Option<(u32, usize, &[u8])> {
             let (magic_bytes, rest) = data.split_first_chunk::<4>()?;
