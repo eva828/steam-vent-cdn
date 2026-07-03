@@ -3,7 +3,6 @@ use steam_vent_cdn::config::ServerMode;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
-#[command(disable_version_flag(true))]
 pub struct Args {
     #[arg(help = "The ID of the app that the workshop item belongs to")]
     pub app_id: u32,
@@ -44,7 +43,7 @@ pub struct Args {
         value_name = "TIMESTAMP",
         help = "Download specific version by timestamp (e.g., 1708434000)"
     )]
-    pub version: Option<u32>,
+    pub timestamp: Option<u32>,
 
     #[arg(long, default_value_t = 16, help = "Parallel download connections")]
     pub parallel_download: usize,
