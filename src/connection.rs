@@ -19,7 +19,7 @@ impl SteamClient {
         Self { config }
     }
 
-    pub async fn connect(self) -> Result<SteamSession> {
+    pub async fn connect(&self) -> Result<SteamSession> {
         let server_list = ServerList::discover()
             .await
             .map_err(SteamSessionError::ServerDiscovery)?;
@@ -52,7 +52,7 @@ impl SteamClient {
         tracing::info!("Connected.");
         Ok(SteamSession {
             connection,
-            config: self.config,
+            config: self.config.clone(),
         })
     }
 }
