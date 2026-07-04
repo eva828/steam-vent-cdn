@@ -14,7 +14,6 @@ use steam_vent_cdn::downloader::client::CdnDownloader;
 #[path = "../_common.rs"]
 mod common;
 
-#[derive(Clone)]
 struct Target {
     app_id: u32,
     item_id: u64,

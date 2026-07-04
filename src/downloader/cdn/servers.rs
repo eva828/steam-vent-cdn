@@ -114,20 +114,6 @@ impl CdnServerList {
         Ok(Self::sorted(servers, server_mode))
     }
 
-    pub(crate) fn new() -> Self {
-        Self::with_server_mode(ServerMode::default())
-    }
-
-    fn with_server_mode(server_mode: ServerMode) -> Self {
-        Self {
-            cache: Vec::new(),
-            cdn: Vec::new(),
-            cursor: Arc::new(AtomicUsize::new(0)),
-            health: Arc::new(Mutex::new(HashMap::new())),
-            server_mode,
-        }
-    }
-
     pub(crate) fn sorted(mut servers: Vec<CdnServer>, server_mode: ServerMode) -> Self {
         sort_by_load(&mut servers);
 
@@ -237,12 +223,6 @@ impl CdnServerList {
             ServerMode::All => Box::new(self.cache.iter().chain(self.cdn.iter())),
         };
         iter.map(|s| s.vhost.as_str())
-    }
-}
-
-impl Default for CdnServerList {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
