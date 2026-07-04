@@ -7,7 +7,7 @@ use crate::downloader::manifest::ManifestEntry;
 use crate::error::Result;
 use models::{DecodedChunk, RawChunk};
 use std::sync::Arc;
-use workers::{run_decode_loop, run_reassembly_loop, spawn_chunk_downloads};
+use workers::{run_decrypt_decode_loop, run_reassembly_loop, spawn_chunk_downloads};
 
 impl DownloadPipeline {
     pub fn download_file(&self, entry: &ManifestEntry) -> Result<FileByteStream> {
@@ -46,7 +46,7 @@ impl DownloadPipeline {
 
         let progress_decode = Arc::clone(&self.progress);
         handles.spawn(async move {
-            run_decode_loop(download_rx, decoded_tx, progress_decode).await;
+            run_decrypt_decode_loop(download_rx, decoded_tx, progress_decode).await;
         });
 
         let progress_reassembly = Arc::clone(&self.progress);

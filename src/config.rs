@@ -3,7 +3,8 @@ use std::time::Duration;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
 pub enum ServerMode {
     #[default]
-    All,
+    #[value(alias("all"))]
+    CachePreferred,
     Cdn,
     Cache,
 }

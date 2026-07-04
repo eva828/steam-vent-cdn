@@ -20,7 +20,7 @@ pub(crate) fn build_fetch_future(
     download_sem: &Arc<tokio::sync::Semaphore>,
     progress: &Arc<dyn ProgressCallback>,
 ) -> ChunkFetchFuture {
-    let chunk_id = hex::encode(&chunk.sha);
+    let chunk_id = hex::encode(&chunk.sha1);
     let compressed_size = chunk.compressed_size;
     let uncompressed_size = chunk.uncompressed_size;
     let crc = chunk.crc;

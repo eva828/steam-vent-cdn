@@ -5,7 +5,7 @@ use steam_vent_proto::content_manifest::content_manifest_payload::file_mapping::
 
 #[derive(Debug, Clone)]
 pub struct ChunkInfo {
-    pub sha: Vec<u8>,
+    pub sha1: Vec<u8>,
     pub crc: u32,
     pub offset: u64,
     pub uncompressed_size: u32,
@@ -17,7 +17,7 @@ impl TryFrom<ChunkData> for ChunkInfo {
 
     fn try_from(mut c: ChunkData) -> Result<Self> {
         Ok(ChunkInfo {
-            sha: c.sha.take().ok_or_else(|| {
+            sha1: c.sha.take().ok_or_else(|| {
                 SteamVentError::Manifest(ManifestError::MissingField("chunk.sha"))
             })?,
             crc: c.crc.take().ok_or_else(|| {

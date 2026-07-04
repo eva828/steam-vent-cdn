@@ -33,12 +33,12 @@ impl HttpFetcher {
         servers: &ContentServerList,
         depot_id: u32,
         manifest_id: u64,
-        mrc: u64,
+        manifest_request_code: u64,
     ) -> Result<Vec<u8>> {
         for server_host in servers.iter() {
             let manifest_url = format!(
                 "https://{}/depot/{}/manifest/{}/5/{}",
-                server_host, depot_id, manifest_id, mrc
+                server_host, depot_id, manifest_id, manifest_request_code
             );
             tracing::debug!("Downloading manifest from {}", manifest_url);
 
@@ -91,7 +91,7 @@ impl HttpFetcher {
         depot_id: u32,
         chunk_id: &str,
     ) -> Result<Vec<u8>> {
-        let mut retry_count = 0;
+        let mut attempt_count = 0;
         let max_attempts =
             std::cmp::max(self.config.retry_policy.max_retries, servers.len() as u32);
 
@@ -106,7 +106,7 @@ impl HttpFetcher {
                 "Attempting chunk {} from {} (attempt {}/{})",
                 chunk_id,
                 server_host,
-                retry_count + 1,
+                attempt_count + 1,
                 max_attempts
             );
 
@@ -134,7 +134,7 @@ impl HttpFetcher {
                         "Retrying chunk {} from {} (attempt {}/{}, status: {}, body: {})",
                         chunk_id,
                         server_host,
-                        retry_count + 1,
+                        attempt_count + 1,
                         max_attempts,
                         status,
                         body_preview,
@@ -162,7 +162,7 @@ impl HttpFetcher {
                         "Retrying chunk {} from {} (attempt {}/{}, error kind: {}, error: {})",
                         chunk_id,
                         server_host,
-                        retry_count + 1,
+                        attempt_count + 1,
                         max_attempts,
                         error_kind,
                         e
@@ -170,14 +170,14 @@ impl HttpFetcher {
                 }
             }
 
-            if retry_count < max_attempts {
-                retry_count += 1;
+            if attempt_count < max_attempts {
+                attempt_count += 1;
                 if should_sleep {
                     let delay_ms = self.config.retry_policy.retry_delay.as_millis();
                     tracing::debug!(
                         "Waiting {}ms before retry {} for chunk {}",
                         delay_ms,
-                        retry_count + 1,
+                        attempt_count + 1,
                         chunk_id
                     );
                     tokio::time::sleep(self.config.retry_policy.retry_delay).await;

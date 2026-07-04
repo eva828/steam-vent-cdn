@@ -154,7 +154,7 @@ impl ContentServerList {
         match self.server_mode {
             ServerMode::Cdn => self.cdn_servers.len(),
             ServerMode::Cache => self.cache_servers.len(),
-            ServerMode::All => self.cache_servers.len() + self.cdn_servers.len(),
+            ServerMode::CachePreferred => self.cache_servers.len() + self.cdn_servers.len(),
         }
     }
 
@@ -220,7 +220,7 @@ impl ContentServerList {
         let iter: Box<dyn Iterator<Item = &ContentServer> + '_> = match self.server_mode {
             ServerMode::Cdn => Box::new(self.cdn_servers.iter()),
             ServerMode::Cache => Box::new(self.cache_servers.iter()),
-            ServerMode::All => Box::new(self.cache_servers.iter().chain(self.cdn_servers.iter())),
+            ServerMode::CachePreferred => Box::new(self.cache_servers.iter().chain(self.cdn_servers.iter())),
         };
         iter.map(|s| s.vhost.as_str())
     }
@@ -247,7 +247,7 @@ impl<'a> RoundRobin<'a> {
         let (primary, fallback) = match self.list.server_mode {
             ServerMode::Cache => (cache, None),
             ServerMode::Cdn => (cdn, None),
-            ServerMode::All => (cache, Some(cdn)),
+            ServerMode::CachePreferred => (cache, Some(cdn)),
         };
 
         let start = self.list.cursor.fetch_add(1, Ordering::Relaxed);

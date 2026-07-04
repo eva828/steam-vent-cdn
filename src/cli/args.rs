@@ -44,8 +44,8 @@ pub struct Args {
     #[arg(
         long,
         value_enum,
-        default_value = "all",
-        help = "Server selection mode: all (cache preferred), cdn, or cache"
+        default_value = "cache-preferred",
+        help = "Server selection mode: cache-preferred(alias: all), cdn, or cache"
     )]
     pub server_mode: ServerMode,
 

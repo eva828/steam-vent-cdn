@@ -25,7 +25,7 @@ pub(crate) fn spawn_chunk_downloads(
         let http_fetcher = http_fetcher.clone();
         let progress = Arc::clone(progress);
 
-        let chunk_id = hex::encode(&chunk.sha);
+        let chunk_id = hex::encode(&chunk.sha1);
         let chunk_offset = chunk.offset;
         let compressed_size = chunk.compressed_size;
         let uncompressed_size = chunk.uncompressed_size;
@@ -69,7 +69,7 @@ pub(crate) fn spawn_chunk_downloads(
     }
 }
 
-pub(crate) async fn run_decode_loop(
+pub(crate) async fn run_decrypt_decode_loop(
     mut download_rx: tokio::sync::mpsc::Receiver<Result<RawChunk>>,
     decoded_tx: tokio::sync::mpsc::Sender<Result<DecodedChunk>>,
     progress: Arc<dyn ProgressCallback>,

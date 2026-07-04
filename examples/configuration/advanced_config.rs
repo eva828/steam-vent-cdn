@@ -38,7 +38,7 @@ async fn main() -> anyhow::Result<()> {
             retry_delay: Duration::from_secs(2),
         })
         .parallel_download(32)
-        .server_mode(ServerMode::All)
+        .server_mode(ServerMode::CachePreferred)
         .build();
 
     let client = SteamClient::new(config);
