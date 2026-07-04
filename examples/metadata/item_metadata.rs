@@ -24,7 +24,7 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::builder().build();
     let client = SteamClient::new(config);
     let session = client.connect().await?;
-    let mut downloader = CdnDownloader::new(session)?;
+    let downloader = CdnDownloader::connect(session).await?;
 
     let details = downloader.fetch_item_details(item_id).await?;
 

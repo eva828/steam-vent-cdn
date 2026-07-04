@@ -1,15 +1,14 @@
 pub mod args;
+pub mod pipeline;
 pub mod progress;
 pub mod ui;
 mod writer;
 
 pub use args::Args;
+pub use pipeline::{run_download_pipeline, run_list_versions_pipeline};
 use indicatif::MultiProgress;
-use progress::ProgressManager;
-use std::sync::Arc;
 use steam_vent_cdn::config::{Config, Credentials, RetryPolicy, ServerMode};
-use steam_vent_cdn::downloader::client::CdnDownloader;
-use steam_vent_cdn::error::{Result, SteamVentError, WorkshopError};
+use steam_vent_cdn::error::{Result, SteamVentError};
 use tracing_subscriber::Layer;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -109,90 +108,3 @@ pub fn create_config(
         .build()
 }
 
-pub async fn run_list_versions_pipeline(
-    downloader: &mut CdnDownloader,
-    item_id: u64,
-) -> Result<()> {
-    let versions = downloader.fetch_all_change_history(item_id).await?;
-    ui::display_version_history(item_id, &versions);
-    Ok(())
-}
-
-pub async fn run_download_pipeline(
-    args: &Args,
-    downloader: &mut CdnDownloader,
-    multi: &MultiProgress,
-) -> Result<()> {
-    let versions = downloader.fetch_all_change_history(args.item_id).await?;
-
-    let timestamp = if let Some(ts) = args.version {
-        ts
-    } else {
-        versions
-            .first()
-            .map(|v| v.timestamp)
-            .ok_or_else(|| SteamVentError::Workshop(WorkshopError::NoVersionsFound))?
-    };
-
-    let version_info = versions
-        .iter()
-        .find(|v| v.timestamp == timestamp)
-        .ok_or_else(|| {
-            SteamVentError::Workshop(WorkshopError::VersionNotFound(format!(
-                "Timestamp {}",
-                timestamp
-            )))
-        })?;
-
-    tracing::info!("Downloading version with timestamp: {}", timestamp);
-    tracing::info!("Description: {}", version_info.description);
-
-    let manifest = downloader
-        .fetch_manifest_info(args.item_id, version_info.manifest_id)
-        .await?;
-
-    let base_path = args
-        .output
-        .join(args.app_id.to_string())
-        .join(args.item_id.to_string())
-        .join(timestamp.to_string());
-
-    if args.list {
-        ui::display_file_list(args.item_id, &manifest.files);
-        return Ok(());
-    }
-
-    for dir in manifest.directories {
-        let output_path = base_path.join(&dir.filename);
-
-        tokio::fs::create_dir_all(&output_path).await?;
-    }
-
-    let progress = ProgressManager::new(multi, &manifest.files);
-    let progress = Arc::new(progress);
-
-    let pipeline = downloader.create_pipeline(progress.clone());
-
-    let mut tasks = tokio::task::JoinSet::new();
-    for file in &manifest.files {
-        let pipeline = pipeline.clone();
-        let base = base_path.clone();
-        let file = file.clone();
-        tasks.spawn(async move {
-            let mut stream = pipeline.download_file(&file)?;
-            writer::write_file(&mut stream, &base).await
-        });
-    }
-
-    while let Some(result) = tasks.join_next().await {
-        result.map_err(|e| {
-            SteamVentError::Io(std::io::Error::other(format!(
-                "File download task panicked: {}",
-                e
-            )))
-        })??;
-    }
-
-    progress.finish();
-    Ok(())
-}

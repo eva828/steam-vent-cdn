@@ -3,6 +3,7 @@
 //! Usage:
 //!     cargo run --example error_handling -- <APP_ID> <ITEM_ID>
 
+use futures::stream::TryStreamExt;
 use steam_vent_cdn::config::Config;
 use steam_vent_cdn::connection::SteamClient;
 use steam_vent_cdn::downloader::client::CdnDownloader;
@@ -24,9 +25,9 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::builder().app_id(app_id).build();
     let client = SteamClient::new(config);
     let session = client.connect().await?;
-    let mut downloader = CdnDownloader::new(session)?;
+    let downloader = CdnDownloader::connect(session).await?;
 
-    match downloader.fetch_all_change_history(item_id).await {
+    match downloader.fetch_versions(item_id, None).try_collect::<Vec<_>>().await {
         Ok(versions) => {
             println!("Found {} version(s)", versions.len());
         }

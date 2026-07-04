@@ -2,20 +2,11 @@ use crate::downloader::cdn::DepotContext;
 use crate::downloader::client::CdnDownloader;
 use crate::downloader::manifest::decode::RawManifest;
 use crate::downloader::manifest::types::Manifest;
-use crate::error::{CdnError, Result, SteamVentError, WorkshopError};
+use crate::error::{Result, SteamVentError, WorkshopError};
 use std::sync::Arc;
 
 impl CdnDownloader {
-    pub async fn fetch_manifest_by_id(
-        &mut self,
-        manifest_id: u64,
-        app_id: u32,
-    ) -> Result<Manifest> {
-        self.cdn_servers.resolve(&mut self.steam_session).await?;
-        if self.cdn_servers.is_empty() {
-            return Err(SteamVentError::Cdn(CdnError::HostResolutionFailed));
-        }
-
+    pub async fn fetch_manifest_by_id(&self, manifest_id: u64, app_id: u32) -> Result<Manifest> {
         let depot_id = app_id;
 
         tracing::debug!("Manifest ID: {}", manifest_id);
@@ -66,18 +57,14 @@ impl CdnDownloader {
         Ok(Manifest::classify(entries))
     }
 
-    pub async fn fetch_latest_manifest_id(&mut self, item_id: u64) -> Result<u64> {
+    pub async fn fetch_latest_manifest_id(&self, item_id: u64) -> Result<u64> {
         let details = self.fetch_item_details(item_id).await?;
         details
             .manifest_id
             .ok_or_else(|| SteamVentError::Workshop(WorkshopError::MissingManifestId))
     }
 
-    pub async fn fetch_manifest_info(
-        &mut self,
-        item_id: u64,
-        manifest_id: u64,
-    ) -> Result<Manifest> {
+    pub async fn fetch_manifest_info(&self, item_id: u64, manifest_id: u64) -> Result<Manifest> {
         let details = self.fetch_item_details(item_id).await?;
 
         tracing::info!("Title: {}", details.title);

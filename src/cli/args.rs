@@ -28,13 +28,6 @@ pub struct Args {
     )]
     pub password: Option<String>,
 
-    #[arg(
-        short,
-        long,
-        help = "Only list the files in the workshop item without downloading"
-    )]
-    pub list: bool,
-
     #[arg(long, help = "List all available versions of the workshop item")]
     pub list_versions: bool,
 

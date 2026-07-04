@@ -16,13 +16,14 @@ pub struct CdnDownloader {
 }
 
 impl CdnDownloader {
-    pub fn new(steam_session: SteamSession) -> Result<Self> {
+    pub async fn connect(steam_session: SteamSession) -> Result<Self> {
         let config = steam_session.config().clone();
         let parallel_download = steam_session.config().parallel_download;
+        let cdn_servers = CdnServerList::discover(&steam_session).await?;
         Ok(Self {
             steam_session,
             http_fetcher: HttpFetcher::new(config)?,
-            cdn_servers: CdnServerList::new(),
+            cdn_servers,
             download_sem: Arc::new(tokio::sync::Semaphore::new(parallel_download)),
         })
     }

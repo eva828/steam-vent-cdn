@@ -76,7 +76,7 @@ fn blacklist_timeout(count: u32) -> Duration {
 }
 
 impl CdnServerList {
-    pub(crate) async fn discover(client: &mut SteamSession) -> Result<Self> {
+    pub(crate) async fn discover(client: &SteamSession) -> Result<Self> {
         tracing::debug!("Finding CDN servers (cell_id={})", DEFAULT_CELL_ID);
 
         let srv_req = CContentServerDirectory_GetServersForSteamPipe_Request {
@@ -91,7 +91,7 @@ impl CdnServerList {
         let server_mode = config.server_mode;
 
         let srv_resp = client
-            .connection_mut()
+            .connection()
             .service_method_with_retry(srv_req, max_retries, retry_delay)
             .await?;
 
@@ -161,22 +161,6 @@ impl CdnServerList {
             cursor: Arc::new(AtomicUsize::new(0)),
             health,
             server_mode,
-        }
-    }
-
-    pub(crate) async fn resolve(&mut self, session: &mut SteamSession) -> Result<()> {
-        if !self.is_empty() {
-            return Ok(());
-        }
-        *self = Self::discover(session).await?;
-        Ok(())
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        match self.server_mode {
-            ServerMode::Cdn => self.cdn.is_empty(),
-            ServerMode::Cache => self.cache.is_empty(),
-            ServerMode::All => self.cache.is_empty() && self.cdn.is_empty(),
         }
     }
 

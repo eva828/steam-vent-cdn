@@ -58,8 +58,8 @@ impl SteamClient {
 }
 
 impl SteamSession {
-    pub(crate) fn connection_mut(&mut self) -> &mut Connection {
-        &mut self.connection
+    pub(crate) fn connection(&self) -> &Connection {
+        &self.connection
     }
 
     pub fn config(&self) -> &Config {

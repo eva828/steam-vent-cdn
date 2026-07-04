@@ -9,6 +9,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use futures::stream::TryStreamExt;
 use steam_vent_cdn::config::{Config, Credentials};
 use steam_vent_cdn::connection::SteamClient;
 use steam_vent_cdn::downloader::client::CdnDownloader;
@@ -53,9 +54,9 @@ async fn main() -> anyhow::Result<()> {
         .build();
     let client = SteamClient::new(config);
     let session = client.connect().await?;
-    let mut downloader = CdnDownloader::new(session)?;
+    let downloader = CdnDownloader::connect(session).await?;
 
-    let versions = downloader.fetch_all_change_history(item_id).await?;
+    let versions: Vec<_> = downloader.fetch_versions(item_id, None).try_collect().await?;
     let latest = versions.first().expect("No versions found");
 
     let manifest = downloader

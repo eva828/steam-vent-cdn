@@ -1,4 +1,3 @@
-use steam_vent_cdn::downloader::manifest::ManifestEntry;
 use steam_vent_cdn::downloader::steam_api::VersionInfo;
 use time::OffsetDateTime;
 use time::macros::format_description;
@@ -11,30 +10,6 @@ fn format_timestamp(timestamp: u32) -> String {
         .ok()
         .and_then(|dt| dt.format(FORMAT).ok())
         .unwrap_or_else(|| "Unknown".to_string())
-}
-
-pub fn format_file_size(size: u64) -> String {
-    if size < 1024 {
-        format!("{} B", size)
-    } else if size < 1024 * 1024 {
-        format!("{:.2} KB", size as f64 / 1024.0)
-    } else {
-        format!("{:.2} MB", size as f64 / (1024.0 * 1024.0))
-    }
-}
-
-pub fn display_file_list(item_id: u64, files: &[ManifestEntry]) {
-    tracing::info!("Workshop item {} files:", item_id);
-    for file in files {
-        let size = file
-            .size
-            .unwrap_or_else(|| file.chunks.iter().map(|c| c.uncompressed_size as u64).sum());
-
-        let size_str = format_file_size(size);
-        tracing::info!("  - {} ({})", file.filename, size_str);
-    }
-
-    tracing::info!("Total: {} files", files.len());
 }
 
 pub fn display_version_history(item_id: u64, versions: &[VersionInfo]) {

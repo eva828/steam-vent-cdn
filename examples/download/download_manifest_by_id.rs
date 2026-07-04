@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::builder().app_id(app_id).build();
     let client = SteamClient::new(config);
     let session = client.connect().await?;
-    let mut downloader = CdnDownloader::new(session)?;
+    let downloader = CdnDownloader::connect(session).await?;
 
     let manifest = downloader.fetch_manifest_by_id(manifest_id, app_id).await?;
 
