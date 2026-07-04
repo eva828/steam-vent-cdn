@@ -19,7 +19,7 @@ impl CdnDownloader {
 
         let manifest_bytes = self
             .http_fetcher
-            .download_manifest(&self.cdn_servers, depot_id, manifest_id, mrc)
+            .download_manifest(&self.content_servers, depot_id, manifest_id, mrc)
             .await?;
 
         let mut raw_manifest = RawManifest::decode(&manifest_bytes)?;
@@ -48,7 +48,7 @@ impl CdnDownloader {
         }
 
         let depot = Arc::new(DepotContext {
-            server_hosts: self.cdn_servers.clone(),
+            servers: self.content_servers.clone(),
             depot_id,
             depot_key: depot_key_opt,
         });

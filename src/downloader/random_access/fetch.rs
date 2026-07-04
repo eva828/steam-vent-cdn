@@ -38,7 +38,7 @@ pub(crate) fn build_fetch_future(
 
         let compressed_data = http_fetcher
             .download_chunk(
-                &RoundRobin::new(&depot.server_hosts),
+                &RoundRobin::new(&depot.servers),
                 depot.depot_id,
                 &chunk_id,
             )

@@ -22,7 +22,7 @@ struct ServerHealth {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct CdnServer {
+pub(crate) struct ContentServer {
     pub vhost: String,
     pub server_type: String,
     pub weighted_load: f32,
@@ -32,25 +32,25 @@ pub(crate) struct CdnServer {
 
 #[derive(Debug, Clone)]
 pub struct DepotContext {
-    pub(crate) server_hosts: CdnServerList,
+    pub(crate) servers: ContentServerList,
     pub depot_id: u32,
     pub depot_key: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct CdnServerList {
-    cache: Vec<CdnServer>,
-    cdn: Vec<CdnServer>,
+pub(crate) struct ContentServerList {
+    cache_servers: Vec<ContentServer>,
+    cdn_servers: Vec<ContentServer>,
     cursor: Arc<AtomicUsize>,
     health: Arc<Mutex<HashMap<String, ServerHealth>>>,
     server_mode: ServerMode,
 }
 
 pub(crate) struct RoundRobin<'a> {
-    list: &'a CdnServerList,
+    list: &'a ContentServerList,
 }
 
-fn sort_by_load(servers: &mut [CdnServer]) {
+fn sort_by_load(servers: &mut [ContentServer]) {
     if servers.iter().any(|s| s.weighted_load.is_nan()) {
         let nan_servers: Vec<&str> = servers
             .iter()
@@ -75,7 +75,7 @@ fn blacklist_timeout(count: u32) -> Duration {
     Duration::from_secs(seconds)
 }
 
-impl CdnServerList {
+impl ContentServerList {
     pub(crate) async fn discover(client: &SteamSession) -> Result<Self> {
         tracing::debug!("Finding CDN servers (cell_id={})", DEFAULT_CELL_ID);
 
@@ -99,10 +99,10 @@ impl CdnServerList {
             return Err(SteamVentError::Cdn(CdnError::NoServers));
         }
 
-        let servers: Vec<CdnServer> = srv_resp
+        let servers: Vec<ContentServer> = srv_resp
             .servers
             .into_iter()
-            .map(|s| CdnServer {
+            .map(|s| ContentServer {
                 vhost: s.vhost().to_string(),
                 server_type: s.type_().to_string(),
                 weighted_load: s.weighted_load(),
@@ -111,10 +111,10 @@ impl CdnServerList {
             })
             .collect();
 
-        Ok(Self::sorted(servers, server_mode))
+        Ok(Self::from_servers(servers, server_mode))
     }
 
-    pub(crate) fn sorted(mut servers: Vec<CdnServer>, server_mode: ServerMode) -> Self {
+    pub(crate) fn from_servers(mut servers: Vec<ContentServer>, server_mode: ServerMode) -> Self {
         sort_by_load(&mut servers);
 
         let (cache, cdn): (Vec<_>, Vec<_>) = servers
@@ -142,8 +142,8 @@ impl CdnServerList {
         ));
 
         Self {
-            cache,
-            cdn,
+            cache_servers: cache,
+            cdn_servers: cdn,
             cursor: Arc::new(AtomicUsize::new(0)),
             health,
             server_mode,
@@ -152,9 +152,9 @@ impl CdnServerList {
 
     pub(crate) fn len(&self) -> usize {
         match self.server_mode {
-            ServerMode::Cdn => self.cdn.len(),
-            ServerMode::Cache => self.cache.len(),
-            ServerMode::All => self.cache.len() + self.cdn.len(),
+            ServerMode::Cdn => self.cdn_servers.len(),
+            ServerMode::Cache => self.cache_servers.len(),
+            ServerMode::All => self.cache_servers.len() + self.cdn_servers.len(),
         }
     }
 
@@ -193,9 +193,9 @@ impl CdnServerList {
 
     pub(crate) fn healthy_count(&self) -> usize {
         let health = self.health.lock().unwrap();
-        self.cache
+        self.cache_servers
             .iter()
-            .chain(self.cdn.iter())
+            .chain(self.cdn_servers.iter())
             .filter(|s| self.is_server_healthy(&health, &s.vhost))
             .count()
     }
@@ -217,17 +217,17 @@ impl CdnServerList {
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = &str> + '_ {
-        let iter: Box<dyn Iterator<Item = &CdnServer> + '_> = match self.server_mode {
-            ServerMode::Cdn => Box::new(self.cdn.iter()),
-            ServerMode::Cache => Box::new(self.cache.iter()),
-            ServerMode::All => Box::new(self.cache.iter().chain(self.cdn.iter())),
+        let iter: Box<dyn Iterator<Item = &ContentServer> + '_> = match self.server_mode {
+            ServerMode::Cdn => Box::new(self.cdn_servers.iter()),
+            ServerMode::Cache => Box::new(self.cache_servers.iter()),
+            ServerMode::All => Box::new(self.cache_servers.iter().chain(self.cdn_servers.iter())),
         };
         iter.map(|s| s.vhost.as_str())
     }
 }
 
 impl<'a> RoundRobin<'a> {
-    pub(crate) fn new(list: &'a CdnServerList) -> Self {
+    pub(crate) fn new(list: &'a ContentServerList) -> Self {
         Self { list }
     }
 
@@ -241,8 +241,8 @@ impl<'a> RoundRobin<'a> {
             return Err(SteamVentError::Cdn(CdnError::NoServers));
         }
 
-        let cache = &self.list.cache;
-        let cdn = &self.list.cdn;
+        let cache = &self.list.cache_servers;
+        let cdn = &self.list.cdn_servers;
 
         let (primary, fallback) = match self.list.server_mode {
             ServerMode::Cache => (cache, None),

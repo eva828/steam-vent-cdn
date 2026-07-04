@@ -45,7 +45,7 @@ pub(crate) fn spawn_chunk_downloads(
             };
 
             let result = http_fetcher
-                .download_chunk(&RoundRobin::new(&depot.server_hosts), depot_id, &chunk_id)
+                .download_chunk(&RoundRobin::new(&depot.servers), depot_id, &chunk_id)
                 .await;
 
             match result {

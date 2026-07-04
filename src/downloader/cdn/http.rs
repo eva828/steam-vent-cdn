@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::error::{CdnError, Result, SteamVentError};
 use reqwest::Client as HttpClient;
 
-use super::servers::{CdnServerList, RoundRobin};
+use super::servers::{ContentServerList, RoundRobin};
 
 #[derive(Clone)]
 pub(crate) struct HttpFetcher {
@@ -30,7 +30,7 @@ impl HttpFetcher {
 
     pub(crate) async fn download_manifest(
         &self,
-        servers: &CdnServerList,
+        servers: &ContentServerList,
         depot_id: u32,
         manifest_id: u64,
         mrc: u64,
