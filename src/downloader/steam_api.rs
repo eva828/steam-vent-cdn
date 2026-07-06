@@ -31,6 +31,7 @@ pub struct ItemDetails {
     pub manifest_id: Option<u64>,
     pub preview_url: Option<String>,
     pub file_url: Option<String>,
+    pub filename: Option<String>,
     pub time_created: Option<u32>,
     pub time_updated: Option<u32>,
     pub creator: Option<u64>,
@@ -47,6 +48,7 @@ impl From<PublishedFileDetails> for ItemDetails {
             manifest_id: details.hcontent_file,
             preview_url: details.preview_url.clone(),
             file_url: details.file_url.clone(),
+            filename: details.filename.clone(),
             time_created: details.time_created,
             time_updated: details.time_updated,
             creator: details.creator,
@@ -77,6 +79,7 @@ impl CdnDownloader {
                 item_id,
             )));
         }
+
         Ok(details_resp.publishedfiledetails[0].clone().into())
     }
 

@@ -32,6 +32,7 @@ rpassword = "7.4.0"
 zstd = "0.13.3"
 rayon = "1.11.0"
 time = { version = "0.3", features = ["macros"] }
+url = "2"
 
 [[example]]
 name = "list_versions"

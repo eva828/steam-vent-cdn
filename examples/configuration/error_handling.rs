@@ -27,7 +27,11 @@ async fn main() -> anyhow::Result<()> {
     let session = client.connect().await?;
     let downloader = CdnDownloader::connect(session).await?;
 
-    match downloader.fetch_versions(item_id, None).try_collect::<Vec<_>>().await {
+    match downloader
+        .fetch_versions(item_id, None)
+        .try_collect::<Vec<_>>()
+        .await
+    {
         Ok(versions) => {
             println!("Found {} version(s)", versions.len());
         }

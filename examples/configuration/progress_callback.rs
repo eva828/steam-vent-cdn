@@ -35,7 +35,10 @@ async fn main() -> anyhow::Result<()> {
     let session = client.connect().await?;
     let downloader = CdnDownloader::connect(session).await?;
 
-    let versions: Vec<_> = downloader.fetch_versions(item_id, None).try_collect().await?;
+    let versions: Vec<_> = downloader
+        .fetch_versions(item_id, None)
+        .try_collect()
+        .await?;
     let latest = versions.first().expect("No versions found");
 
     let manifest = downloader

@@ -220,7 +220,9 @@ impl ContentServerList {
         let iter: Box<dyn Iterator<Item = &ContentServer> + '_> = match self.server_mode {
             ServerMode::Cdn => Box::new(self.cdn_servers.iter()),
             ServerMode::Cache => Box::new(self.cache_servers.iter()),
-            ServerMode::CachePreferred => Box::new(self.cache_servers.iter().chain(self.cdn_servers.iter())),
+            ServerMode::CachePreferred => {
+                Box::new(self.cache_servers.iter().chain(self.cdn_servers.iter()))
+            }
         };
         iter.map(|s| s.vhost.as_str())
     }

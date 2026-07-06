@@ -28,7 +28,10 @@ async fn main() -> anyhow::Result<()> {
     let session = client.connect().await?;
     let downloader = CdnDownloader::connect(session).await?;
 
-    let versions: Vec<_> = downloader.fetch_versions(item_id, None).try_collect().await?;
+    let versions: Vec<_> = downloader
+        .fetch_versions(item_id, None)
+        .try_collect()
+        .await?;
 
     let format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
 

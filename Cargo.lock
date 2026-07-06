@@ -2284,6 +2284,7 @@ dependencies = [
  "tracing-appender",
  "tracing-indicatif",
  "tracing-subscriber",
+ "url",
  "zip",
  "zstd",
 ]

@@ -14,7 +14,7 @@ impl HttpFetcher {
     pub(crate) fn new(config: Config) -> Result<Self> {
         let http_client = HttpClient::builder()
             .timeout(config.timeout)
-            .http2_prior_knowledge()
+            // .http2_prior_knowledge()
             .build()
             .map_err(|e| {
                 SteamVentError::Cdn(CdnError::InvalidConfiguration(format!(
@@ -83,6 +83,60 @@ impl HttpFetcher {
             }
         }
         Err(SteamVentError::Cdn(CdnError::AllServersFailed))
+    }
+
+    pub(crate) async fn download_web_file(&self, url: &str) -> Result<Vec<u8>> {
+        let max_attempts = self.config.retry_policy.max_retries + 1;
+        let retry_delay = self.config.retry_policy.retry_delay;
+
+        for attempt in 0..max_attempts {
+            let should_retry = attempt + 1 < max_attempts;
+
+            match self.http_client.get(url).send().await {
+                Ok(resp) if resp.status().is_success() => {
+                    return resp
+                        .bytes()
+                        .await
+                        .map(|b| b.to_vec())
+                        .map_err(SteamVentError::from);
+                }
+                Ok(resp) => {
+                    let status = resp.status();
+                    let body = resp.bytes().await.unwrap_or_default();
+                    let body_preview = String::from_utf8_lossy(&body[..body.len().min(256)]);
+                    tracing::debug!(
+                        "Web download failed (attempt {}/{}, status: {}, body: {})",
+                        attempt + 1,
+                        max_attempts,
+                        status,
+                        body_preview,
+                    );
+                    if status == reqwest::StatusCode::NOT_FOUND
+                        || status == reqwest::StatusCode::FORBIDDEN
+                    {
+                        return Err(SteamVentError::Cdn(CdnError::HttpError { status }));
+                    }
+                    if !should_retry {
+                        return Err(SteamVentError::Cdn(CdnError::HttpError { status }));
+                    }
+                }
+                Err(e) => {
+                    tracing::debug!(
+                        "Web download request failed (attempt {}/{}): {}",
+                        attempt + 1,
+                        max_attempts,
+                        e,
+                    );
+                    if !should_retry {
+                        return Err(SteamVentError::from(e));
+                    }
+                }
+            }
+
+            tokio::time::sleep(retry_delay).await;
+        }
+
+        unreachable!()
     }
 
     pub(crate) async fn download_chunk(

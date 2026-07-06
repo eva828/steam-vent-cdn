@@ -38,6 +38,10 @@ impl CdnDownloader {
         }
     }
 
+    pub async fn download_web_file(&self, url: &str) -> Result<Vec<u8>> {
+        self.http_fetcher.download_web_file(url).await
+    }
+
     pub fn create_reader(
         &self,
         entry: &ManifestEntry,

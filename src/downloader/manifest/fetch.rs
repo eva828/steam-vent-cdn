@@ -7,11 +7,25 @@ use std::sync::Arc;
 
 impl CdnDownloader {
     pub async fn fetch_manifest_by_id(&self, manifest_id: u64, app_id: u32) -> Result<Manifest> {
+        // depot_id equals app_id for all known workshop items.
+        // If a counterexample is found, this needs to become a separate parameter.
         let depot_id = app_id;
+        tracing::debug!(
+            "Using app_id={}, depot_id={}, manifest_id={}",
+            app_id,
+            depot_id,
+            manifest_id
+        );
+        self.fetch_and_decode_manifest(manifest_id, app_id, depot_id)
+            .await
+    }
 
-        tracing::debug!("Manifest ID: {}", manifest_id);
-        tracing::debug!("App/Depot ID: {}", app_id);
-
+    async fn fetch_and_decode_manifest(
+        &self,
+        manifest_id: u64,
+        app_id: u32,
+        depot_id: u32,
+    ) -> Result<Manifest> {
         let mrc = self
             .fetch_manifest_request_code(app_id, depot_id, manifest_id)
             .await?;

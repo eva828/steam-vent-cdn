@@ -5,8 +5,8 @@ pub mod ui;
 mod writer;
 
 pub use args::Args;
-pub use pipeline::{run_download_pipeline, run_list_versions_pipeline};
 use indicatif::MultiProgress;
+pub use pipeline::{run_download_pipeline, run_list_versions_pipeline};
 use steam_vent_cdn::config::{Config, Credentials, RetryPolicy, ServerMode};
 use steam_vent_cdn::error::{Result, SteamVentError};
 use tracing_subscriber::Layer;
@@ -107,4 +107,3 @@ pub fn create_config(
         })
         .build()
 }
-

@@ -37,11 +37,7 @@ pub(crate) fn build_fetch_future(
             .map_err(|_| SteamVentError::Cdn(CdnError::SemaphoreClosed))?;
 
         let compressed_data = http_fetcher
-            .download_chunk(
-                &RoundRobin::new(&depot.servers),
-                depot.depot_id,
-                &chunk_id,
-            )
+            .download_chunk(&RoundRobin::new(&depot.servers), depot.depot_id, &chunk_id)
             .await?;
 
         progress.on_download_progress(compressed_size as u64);
