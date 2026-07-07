@@ -148,6 +148,19 @@ pub enum WorkshopError {
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
+pub enum WebError {
+    #[error("HTTP error: {status}")]
+    HttpError { status: reqwest::StatusCode },
+
+    #[error("Invalid configuration: {0}")]
+    InvalidConfiguration(String),
+
+    #[error("All download attempts failed")]
+    AllAttemptsFailed,
+}
+
+#[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum SteamVentError {
     #[error("Steam session error")]
     SteamSession(#[from] SteamSessionError),
@@ -172,6 +185,9 @@ pub enum SteamVentError {
 
     #[error("Workshop error")]
     Workshop(#[from] WorkshopError),
+
+    #[error("Web download error")]
+    Web(#[from] WebError),
 
     #[error("IO error")]
     Io(#[from] std::io::Error),

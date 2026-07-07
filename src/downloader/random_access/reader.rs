@@ -7,7 +7,7 @@ use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncSeek, ReadBuf};
 
 use crate::downloader::cdn::DepotContext;
-use crate::downloader::cdn::http::HttpFetcher;
+use crate::downloader::cdn::http::CdnFetcher;
 use crate::downloader::manifest::{ChunkInfo, ManifestEntry};
 use crate::downloader::progress::ProgressCallback;
 use crate::downloader::random_access::fetch::{ChunkFetchFuture, build_fetch_future};
@@ -15,7 +15,7 @@ use crate::downloader::random_access::fetch::{ChunkFetchFuture, build_fetch_futu
 pub struct CdnRandomAccessReader {
     pub(crate) chunks: Vec<ChunkInfo>,
     pub(crate) depot: Arc<DepotContext>,
-    pub(crate) http_fetcher: HttpFetcher,
+    pub(crate) http_fetcher: CdnFetcher,
     pub(crate) download_sem: Arc<tokio::sync::Semaphore>,
     pub(crate) total_size: u64,
     pub(crate) position: u64,
@@ -28,7 +28,7 @@ pub struct CdnRandomAccessReader {
 impl CdnRandomAccessReader {
     pub(crate) fn new(
         entry: &ManifestEntry,
-        http_fetcher: HttpFetcher,
+        http_fetcher: CdnFetcher,
         download_sem: Arc<tokio::sync::Semaphore>,
         progress: Arc<dyn ProgressCallback>,
     ) -> Self {

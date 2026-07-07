@@ -3,14 +3,14 @@ use std::sync::Arc;
 
 use crate::downloader::ProgressCallback;
 use crate::downloader::archive::SteamChunk;
-use crate::downloader::cdn::http::HttpFetcher;
+use crate::downloader::cdn::http::CdnFetcher;
 use crate::downloader::cdn::servers::RoundRobin;
 use crate::downloader::manifest::ManifestEntry;
 use crate::downloader::sequential::models::{DecodedChunk, RawChunk};
 use crate::error::{CdnError, Result, SteamVentError};
 
 pub(crate) fn spawn_chunk_downloads(
-    http_fetcher: &HttpFetcher,
+    http_fetcher: &CdnFetcher,
     download_sem: &Arc<tokio::sync::Semaphore>,
     progress: &Arc<dyn ProgressCallback>,
     entry: &ManifestEntry,

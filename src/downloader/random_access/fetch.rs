@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::downloader::archive::SteamChunk;
 use crate::downloader::cdn::DepotContext;
-use crate::downloader::cdn::http::HttpFetcher;
+use crate::downloader::cdn::http::CdnFetcher;
 use crate::downloader::cdn::servers::RoundRobin;
 use crate::downloader::manifest::ChunkInfo;
 use crate::downloader::progress::ProgressCallback;
@@ -16,7 +16,7 @@ pub(crate) fn build_fetch_future(
     chunk_idx: usize,
     chunk: &ChunkInfo,
     depot: &Arc<DepotContext>,
-    http_fetcher: &HttpFetcher,
+    http_fetcher: &CdnFetcher,
     download_sem: &Arc<tokio::sync::Semaphore>,
     progress: &Arc<dyn ProgressCallback>,
 ) -> ChunkFetchFuture {

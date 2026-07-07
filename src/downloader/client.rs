@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use crate::connection::SteamSession;
-use crate::downloader::cdn::http::HttpFetcher;
+use crate::downloader::cdn::http::CdnFetcher;
 use crate::downloader::cdn::servers::ContentServerList;
+use crate::downloader::web::HttpFetcher;
 use crate::downloader::manifest::ManifestEntry;
 use crate::downloader::random_access::CdnRandomAccessReader;
 use crate::downloader::{DownloadPipeline, ProgressCallback};
@@ -10,7 +11,8 @@ use crate::error::Result;
 
 pub struct CdnDownloader {
     pub(crate) steam_session: SteamSession,
-    pub(crate) http_fetcher: HttpFetcher,
+    pub(crate) http_fetcher: CdnFetcher,
+    pub(crate) web_fetcher: HttpFetcher,
     pub(crate) content_servers: ContentServerList,
     pub(crate) download_sem: Arc<tokio::sync::Semaphore>,
 }
@@ -22,7 +24,8 @@ impl CdnDownloader {
         let content_servers = ContentServerList::discover(&steam_session).await?;
         Ok(Self {
             steam_session,
-            http_fetcher: HttpFetcher::new(config)?,
+            http_fetcher: CdnFetcher::new(config.clone())?,
+            web_fetcher: HttpFetcher::new(config)?,
             content_servers,
             download_sem: Arc::new(tokio::sync::Semaphore::new(parallel_download)),
         })
@@ -39,7 +42,7 @@ impl CdnDownloader {
     }
 
     pub async fn download_web_file(&self, url: &str) -> Result<Vec<u8>> {
-        self.http_fetcher.download_web_file(url).await
+        self.web_fetcher.download_file(url).await
     }
 
     pub fn create_reader(
