@@ -7,7 +7,7 @@ use crate::downloader::cdn::http::CdnFetcher;
 use crate::downloader::cdn::servers::RoundRobin;
 use crate::downloader::manifest::ManifestEntry;
 use crate::downloader::sequential::models::{DecodedChunk, RawChunk};
-use crate::error::{CdnError, Result, SteamVentError};
+use crate::error::{DownloadError, Result, SteamVentError};
 
 pub(crate) fn spawn_chunk_downloads(
     http_fetcher: &CdnFetcher,
@@ -38,7 +38,7 @@ pub(crate) fn spawn_chunk_downloads(
                 Ok(permit) => permit,
                 Err(_) => {
                     let _ = download_tx
-                        .send(Err(SteamVentError::Cdn(CdnError::SemaphoreClosed)))
+                        .send(Err(SteamVentError::Download(DownloadError::SemaphoreClosed)))
                         .await;
                     return;
                 }
@@ -174,7 +174,7 @@ pub(crate) async fn run_reassembly_loop(
             total_chunks,
         );
         let _ = output_tx
-            .send(Err(SteamVentError::Cdn(CdnError::IncompleteDownload {
+            .send(Err(SteamVentError::Download(DownloadError::IncompleteDownload {
                 filename,
                 received,
                 total: total_chunks,

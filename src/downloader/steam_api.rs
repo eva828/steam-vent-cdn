@@ -1,6 +1,6 @@
 use crate::connection::ConnectionExt;
 use crate::downloader::client::CdnDownloader;
-use crate::error::{CdnError, Result, SteamSessionError, SteamVentError, WorkshopError};
+use crate::error::{DownloadError, Result, SteamSessionError, SteamVentError, WorkshopError};
 use std::pin::Pin;
 
 use async_stream::try_stream;
@@ -196,7 +196,7 @@ impl CdnDownloader {
             .map_err(SteamVentError::SteamSession)?;
         code_resp
             .manifest_request_code
-            .ok_or_else(|| SteamVentError::Cdn(CdnError::ManifestRequestCodeFailed))
+            .ok_or_else(|| SteamVentError::Download(DownloadError::ManifestRequestCodeFailed))
     }
 
     pub(crate) async fn fetch_depot_key(&self, app_id: u32, depot_id: u32) -> Result<Vec<u8>> {
@@ -214,7 +214,7 @@ impl CdnDownloader {
             .map_err(|e| SteamSessionError::ApiCallFailed(Box::new(e)))
             .map_err(SteamVentError::SteamSession)?;
         if key_resp.eresult() != 1 {
-            return Err(SteamVentError::Cdn(CdnError::DepotKeyFailed(
+            return Err(SteamVentError::Download(DownloadError::DepotKeyFailed(
                 key_resp.eresult(),
             )));
         }

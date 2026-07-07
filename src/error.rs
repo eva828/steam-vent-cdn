@@ -24,12 +24,15 @@ impl From<steam_vent::NetworkError> for SteamSessionError {
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
-pub enum CdnError {
+pub enum DownloadError {
     #[error("No CDN servers available")]
     NoServers,
 
     #[error("All CDN servers failed")]
     AllServersFailed,
+
+    #[error("All download attempts failed")]
+    AllAttemptsFailed,
 
     #[error("Failed to resolve CDN hosts")]
     HostResolutionFailed,
@@ -148,25 +151,12 @@ pub enum WorkshopError {
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
-pub enum WebError {
-    #[error("HTTP error: {status}")]
-    HttpError { status: reqwest::StatusCode },
-
-    #[error("Invalid configuration: {0}")]
-    InvalidConfiguration(String),
-
-    #[error("All download attempts failed")]
-    AllAttemptsFailed,
-}
-
-#[derive(Error, Debug)]
-#[non_exhaustive]
 pub enum SteamVentError {
     #[error("Steam session error")]
     SteamSession(#[from] SteamSessionError),
 
-    #[error("CDN error")]
-    Cdn(#[from] CdnError),
+    #[error("Download error")]
+    Download(#[from] DownloadError),
 
     #[error("Compression error")]
     Compression(#[from] CompressionError),
@@ -185,9 +175,6 @@ pub enum SteamVentError {
 
     #[error("Workshop error")]
     Workshop(#[from] WorkshopError),
-
-    #[error("Web download error")]
-    Web(#[from] WebError),
 
     #[error("IO error")]
     Io(#[from] std::io::Error),

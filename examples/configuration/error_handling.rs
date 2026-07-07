@@ -41,8 +41,8 @@ async fn main() -> anyhow::Result<()> {
         Err(SteamVentError::SteamSession(e)) => {
             eprintln!("Steam session error: {}", e);
         }
-        Err(SteamVentError::Cdn(e)) => {
-            eprintln!("CDN error: {}", e);
+        Err(SteamVentError::Download(e)) => {
+            eprintln!("Download error: {}", e);
         }
         Err(SteamVentError::Network(e)) => {
             eprintln!("Network error: {}", e);

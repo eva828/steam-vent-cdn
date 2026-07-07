@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::error::{CdnError, Result, SteamVentError};
+use crate::error::{DownloadError, Result, SteamVentError};
 use reqwest::Client as HttpClient;
 
 use super::servers::{ContentServerList, RoundRobin};
@@ -17,7 +17,7 @@ impl CdnFetcher {
             .http2_prior_knowledge()
             .build()
             .map_err(|e| {
-                SteamVentError::Cdn(CdnError::InvalidConfiguration(format!(
+                SteamVentError::Download(DownloadError::InvalidConfiguration(format!(
                     "Failed to build HTTP client: {}",
                     e
                 )))
@@ -60,7 +60,7 @@ impl CdnFetcher {
                         headers.join(", "),
                         body_preview
                     );
-                    return Err(SteamVentError::Cdn(CdnError::HttpError { status }));
+                    return Err(SteamVentError::Download(DownloadError::HttpError { status }));
                 }
                 resp.bytes().await.map_err(SteamVentError::from)
             }
@@ -82,7 +82,7 @@ impl CdnFetcher {
                 }
             }
         }
-        Err(SteamVentError::Cdn(CdnError::AllServersFailed))
+        Err(SteamVentError::Download(DownloadError::AllServersFailed))
     }
 
     pub(crate) async fn download_chunk(
@@ -190,7 +190,7 @@ impl CdnFetcher {
                     max_attempts,
                     healthy
                 );
-                return Err(SteamVentError::Cdn(CdnError::AllServersFailed));
+                return Err(SteamVentError::Download(DownloadError::AllServersFailed));
             }
         }
     }

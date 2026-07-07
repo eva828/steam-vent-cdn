@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::error::{Result, SteamVentError, WebError};
+use crate::error::{DownloadError, Result, SteamVentError};
 use reqwest::Client;
 
 #[derive(Clone)]
@@ -14,7 +14,7 @@ impl HttpFetcher {
             .timeout(config.timeout)
             .build()
             .map_err(|e| {
-                SteamVentError::Web(WebError::InvalidConfiguration(format!(
+                SteamVentError::Download(DownloadError::InvalidConfiguration(format!(
                     "Failed to build HTTP client: {}",
                     e
                 )))
@@ -49,7 +49,7 @@ impl HttpFetcher {
                     if status == reqwest::StatusCode::NOT_FOUND
                         || status == reqwest::StatusCode::FORBIDDEN
                     {
-                        return Err(SteamVentError::Web(WebError::HttpError { status }));
+                        return Err(SteamVentError::Download(DownloadError::HttpError { status }));
                     }
                 }
                 Err(e) => {
@@ -67,6 +67,6 @@ impl HttpFetcher {
             }
         }
 
-        Err(SteamVentError::Web(WebError::AllAttemptsFailed))
+        Err(SteamVentError::Download(DownloadError::AllAttemptsFailed))
     }
 }

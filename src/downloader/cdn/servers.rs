@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use crate::config::ServerMode;
 use crate::connection::{ConnectionExt, SteamSession};
-use crate::error::{CdnError, Result, SteamVentError};
+use crate::error::{DownloadError, Result, SteamVentError};
 use steam_vent_proto::steammessages_contentsystem_steamclient::CContentServerDirectory_GetServersForSteamPipe_Request;
 
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
@@ -96,7 +96,7 @@ impl ContentServerList {
             .await?;
 
         if srv_resp.servers.is_empty() {
-            return Err(SteamVentError::Cdn(CdnError::NoServers));
+            return Err(SteamVentError::Download(DownloadError::NoServers));
         }
 
         let servers: Vec<ContentServer> = srv_resp
@@ -240,7 +240,7 @@ impl<'a> RoundRobin<'a> {
     pub(crate) fn next(&self) -> Result<&str> {
         let total = self.list.len();
         if total == 0 {
-            return Err(SteamVentError::Cdn(CdnError::NoServers));
+            return Err(SteamVentError::Download(DownloadError::NoServers));
         }
 
         let cache = &self.list.cache_servers;
@@ -272,7 +272,7 @@ impl<'a> RoundRobin<'a> {
             }
         }
 
-        Err(SteamVentError::Cdn(CdnError::AllServersFailed))
+        Err(SteamVentError::Download(DownloadError::AllServersFailed))
     }
 
     pub(crate) fn report_success(&self, server_host: &str) {
