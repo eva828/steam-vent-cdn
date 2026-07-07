@@ -18,6 +18,9 @@ impl<'a> ZipArchiveExtractor<'a> {
     pub const MAGIC: &'static [u8] = b"PK\x03\x04";
 
     pub(crate) fn new(data: &'a [u8]) -> Result<Self> {
+        if !data.starts_with(Self::MAGIC) {
+            return Err(CompressionError::InvalidMagic { expected: Self::MAGIC })?;
+        }
         Ok(Self { data })
     }
 }
@@ -43,15 +46,25 @@ pub(crate) struct ZstdArchiveExtractor<'a> {
 }
 
 impl<'a> ZstdArchiveExtractor<'a> {
+    const HEADER_LEN: usize = 8;
+
     pub const MAGIC: &'static [u8] = b"VSZa";
 
     pub(crate) fn new(data: &'a [u8]) -> Result<Self> {
+        if !data.starts_with(Self::MAGIC) {
+            return Err(CompressionError::InvalidMagic { expected: Self::MAGIC })?;
+        }
         Ok(Self { data })
     }
 }
 
 impl<'a> ArchiveExtractor for ZstdArchiveExtractor<'a> {
     fn extract(&self) -> Result<Vec<u8>> {
+        if self.data.len() < Self::HEADER_LEN {
+            return Err(CompressionError::InvalidData(
+                "Zstd data too short for header",
+            ))?;
+        }
         let zstd_payload = &self.data[8..];
         let mut decompressed = Vec::new();
         let mut decoder = zstd::stream::Decoder::new(Cursor::new(zstd_payload))
@@ -72,22 +85,27 @@ pub(crate) struct VZaArchiveExtractor<'a> {
 }
 
 impl<'a> VZaArchiveExtractor<'a> {
+    const MIN_DATA_LEN: usize = 17;
+
     pub const MAGIC: &'static [u8] = b"VZa";
 
     pub(crate) fn new(data: &'a [u8]) -> Result<Self> {
+        if !data.starts_with(Self::MAGIC) {
+            return Err(CompressionError::InvalidMagic { expected: Self::MAGIC })?;
+        }
         Ok(Self { data })
     }
 }
 
 impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
     fn extract(&self) -> Result<Vec<u8>> {
-        if !self.data.starts_with(Self::MAGIC) {
-            return Err(CompressionError::InvalidLzmaHeader("Not VZa format"))?;
+        if self.data.len() < Self::MIN_DATA_LEN {
+            return Err(CompressionError::InvalidData("VZa data too short"))?;
         }
 
         let footer_zv = &self.data[self.data.len() - 2..];
         if footer_zv != b"zv" {
-            return Err(CompressionError::InvalidLzmaHeader(
+            return Err(CompressionError::InvalidData(
                 "VZa footer does not end with 'zv'",
             ))?;
         }
@@ -95,7 +113,7 @@ impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
         let uncompressed_size_bytes = &self.data[self.data.len() - 6..self.data.len() - 2];
         let uncompressed_size =
             u32::from_le_bytes(uncompressed_size_bytes.try_into().map_err(|_| {
-                CompressionError::InvalidLzmaHeader(
+                CompressionError::InvalidData(
                     "Failed to parse uncompressed size from VZa footer",
                 )
             })?) as usize;
@@ -127,21 +145,23 @@ impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
 
 pub(crate) struct LzmaArchiveExtractor<'a> {
     data: &'a [u8],
-    offset: usize,
 }
 
 impl<'a> LzmaArchiveExtractor<'a> {
     pub const MAGIC: &'static [u8] = &[0x5D, 0x00, 0x00, 0x80, 0x00];
 
-    pub(crate) fn new(data: &'a [u8], offset: usize) -> Result<Self> {
-        Ok(Self { data, offset })
+    pub(crate) fn new(data: &'a [u8]) -> Result<Self> {
+        if !data.starts_with(Self::MAGIC) {
+            return Err(CompressionError::InvalidMagic { expected: Self::MAGIC })?;
+        }
+        Ok(Self { data })
     }
 }
 
 impl<'a> ArchiveExtractor for LzmaArchiveExtractor<'a> {
     fn extract(&self) -> Result<Vec<u8>> {
-        let input_size = self.data.len() - self.offset;
-        let mut reader = Cursor::new(&self.data[self.offset..]);
+        let input_size = self.data.len();
+        let mut reader = Cursor::new(self.data);
         let mut decompressed = Vec::new();
         lzma_rs::lzma_decompress(&mut reader, &mut decompressed).map_err(CompressionError::Lzma)?;
         tracing::debug!(
@@ -173,6 +193,22 @@ impl<'a> ArchiveExtractor for RawArchiveExtractor<'a> {
         );
         Ok(output)
     }
+}
+
+pub(crate) fn create_archive_extractor(data: &[u8]) -> Result<Box<dyn ArchiveExtractor + '_>> {
+    if let Ok(ext) = ZipArchiveExtractor::new(data) {
+        return Ok(Box::new(ext));
+    }
+    if let Ok(ext) = ZstdArchiveExtractor::new(data) {
+        return Ok(Box::new(ext));
+    }
+    if let Ok(ext) = VZaArchiveExtractor::new(data) {
+        return Ok(Box::new(ext));
+    }
+    if let Ok(ext) = LzmaArchiveExtractor::new(data) {
+        return Ok(Box::new(ext));
+    }
+    Ok(Box::new(RawArchiveExtractor::new(data)?))
 }
 
 #[derive(Debug)]
@@ -221,7 +257,7 @@ impl SteamChunk {
     ) -> Result<Self> {
         match self {
             Self::Decrypted(data) => {
-                let extractor = Self::get_extractor(&data)?;
+                let extractor = create_archive_extractor(&data)?;
                 let decompressed = extractor.extract()?;
 
                 let actual_size = decompressed.len() as u32;
@@ -290,21 +326,4 @@ impl SteamChunk {
         }
     }
 
-    fn get_extractor(data: &[u8]) -> Result<Box<dyn ArchiveExtractor + '_>> {
-        match data {
-            d if d.starts_with(ZipArchiveExtractor::MAGIC) => {
-                Ok(Box::new(ZipArchiveExtractor::new(d)?))
-            }
-            d if d.starts_with(ZstdArchiveExtractor::MAGIC) => {
-                Ok(Box::new(ZstdArchiveExtractor::new(d)?))
-            }
-            d if d.starts_with(VZaArchiveExtractor::MAGIC) => {
-                Ok(Box::new(VZaArchiveExtractor::new(d)?))
-            }
-            d if d.starts_with(LzmaArchiveExtractor::MAGIC) => {
-                Ok(Box::new(LzmaArchiveExtractor::new(d, 0)?))
-            }
-            d => Ok(Box::new(RawArchiveExtractor::new(d)?)),
-        }
-    }
 }

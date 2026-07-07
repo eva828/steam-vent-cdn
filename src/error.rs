@@ -73,7 +73,10 @@ pub enum CompressionError {
     Zip(#[from] zip::result::ZipError),
 
     #[error("Invalid compression data: {0}")]
-    InvalidLzmaHeader(&'static str),
+    InvalidData(&'static str),
+
+    #[error("Invalid magic: expected {expected:02X?}")]
+    InvalidMagic { expected: &'static [u8] },
 }
 
 #[derive(Error, Debug)]
