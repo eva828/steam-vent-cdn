@@ -8,7 +8,7 @@ pub use args::Args;
 use indicatif::MultiProgress;
 pub use pipeline::{run_download_pipeline, run_list_versions_pipeline};
 use steam_vent_cdn::config::{Config, Credentials, RetryPolicy, ServerMode};
-use steam_vent_cdn::error::{Result, SteamVentError};
+use steam_vent_cdn::error::Result;
 use tracing_subscriber::Layer;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -78,10 +78,7 @@ pub fn resolve_credentials(
         (Some(username), Some(password)) => Ok(Credentials::UserPass { username, password }),
         (Some(username), None) => {
             let password = rpassword::prompt_password("Password: ").map_err(|e| {
-                SteamVentError::Io(std::io::Error::other(format!(
-                    "Password input failed: {}",
-                    e
-                )))
+                std::io::Error::other(format!("Password input failed: {}", e))
             })?;
             Ok(Credentials::UserPass { username, password })
         }

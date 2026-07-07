@@ -75,9 +75,7 @@ impl CdnDownloader {
             .await?;
 
         if details_resp.publishedfiledetails.is_empty() {
-            return Err(SteamVentError::Workshop(WorkshopError::ItemDetailsMissing(
-                item_id,
-            )));
+            return Err(WorkshopError::ItemDetailsMissing(item_id))?;
         }
 
         Ok(details_resp.publishedfiledetails[0].clone().into())
@@ -194,9 +192,9 @@ impl CdnDownloader {
             .await
             .map_err(|e| SteamSessionError::ApiCallFailed(Box::new(e)))
             .map_err(SteamVentError::SteamSession)?;
-        code_resp
+        Ok(code_resp
             .manifest_request_code
-            .ok_or_else(|| SteamVentError::Download(DownloadError::ManifestRequestCodeFailed))
+            .ok_or(DownloadError::ManifestRequestCodeFailed)?)
     }
 
     pub(crate) async fn fetch_depot_key(&self, app_id: u32, depot_id: u32) -> Result<Vec<u8>> {
@@ -214,9 +212,7 @@ impl CdnDownloader {
             .map_err(|e| SteamSessionError::ApiCallFailed(Box::new(e)))
             .map_err(SteamVentError::SteamSession)?;
         if key_resp.eresult() != 1 {
-            return Err(SteamVentError::Download(DownloadError::DepotKeyFailed(
-                key_resp.eresult(),
-            )));
+            return Err(DownloadError::DepotKeyFailed(key_resp.eresult()))?;
         }
         Ok(key_resp.depot_encryption_key().to_vec())
     }

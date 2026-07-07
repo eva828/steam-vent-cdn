@@ -1,5 +1,5 @@
 use crate::config::{Config, Credentials};
-use crate::error::{Result, SteamSessionError, SteamVentError};
+use crate::error::{Result, SteamSessionError};
 
 use steam_vent::ServerList;
 use steam_vent::auth::{FileGuardDataStore, UserProvidedAuthConfirmationHandler};
@@ -28,7 +28,7 @@ impl SteamClient {
             Credentials::Anonymous => {
                 tracing::info!("Connecting anonymously to Steam");
                 Connection::anonymous(&server_list).await.map_err(|e| {
-                    SteamVentError::SteamSession(SteamSessionError::SessionInit(e.to_string()))
+                    SteamSessionError::SessionInit(e.to_string())
                 })?
             }
             Credentials::UserPass { username, password } => {
@@ -42,7 +42,7 @@ impl SteamClient {
                 Connection::login(&server_list, username, password, guard_store, auth_handler)
                     .await
                     .map_err(|e| {
-                        SteamVentError::SteamSession(SteamSessionError::LoginFailed(e.to_string()))
+                        SteamSessionError::LoginFailed(e.to_string())
                     })?
             }
         };
@@ -99,7 +99,7 @@ pub(crate) trait ConnectionExt: steam_vent::ConnectionTrait + Sync {
                         tokio::time::sleep(retry_delay).await;
                         retry_count += 1;
                     }
-                    _ => return Err(SteamVentError::SteamSession(e.into())),
+                    _ => return Err(SteamSessionError::from(e).into()),
                 }
             }
         }

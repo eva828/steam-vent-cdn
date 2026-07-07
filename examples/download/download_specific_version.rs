@@ -10,7 +10,7 @@ use futures::stream::TryStreamExt;
 use steam_vent_cdn::config::Config;
 use steam_vent_cdn::connection::SteamClient;
 use steam_vent_cdn::downloader::client::CdnDownloader;
-use steam_vent_cdn::error::{SteamVentError, WorkshopError};
+use steam_vent_cdn::error::WorkshopError;
 
 #[path = "../_common.rs"]
 mod common;
@@ -45,12 +45,10 @@ async fn main() -> anyhow::Result<()> {
             break;
         }
     }
-    let version = version.ok_or_else(|| {
-        SteamVentError::Workshop(WorkshopError::VersionNotFound(format!(
-            "Timestamp {}",
-            timestamp
-        )))
-    })?;
+    let version = version.ok_or(WorkshopError::VersionNotFound(format!(
+        "Timestamp {}",
+        timestamp
+    )))?;
 
     tracing::info!("Downloading version: {}", version.timestamp);
 

@@ -14,10 +14,10 @@ impl HttpFetcher {
             .timeout(config.timeout)
             .build()
             .map_err(|e| {
-                SteamVentError::Download(DownloadError::InvalidConfiguration(format!(
+                DownloadError::InvalidConfiguration(format!(
                     "Failed to build HTTP client: {}",
                     e
-                )))
+                ))
             })?;
         Ok(Self { client, config })
     }
@@ -49,7 +49,7 @@ impl HttpFetcher {
                     if status == reqwest::StatusCode::NOT_FOUND
                         || status == reqwest::StatusCode::FORBIDDEN
                     {
-                        return Err(SteamVentError::Download(DownloadError::HttpError { status }));
+                        return Err(DownloadError::HttpError { status })?;
                     }
                 }
                 Err(e) => {
@@ -67,6 +67,6 @@ impl HttpFetcher {
             }
         }
 
-        Err(SteamVentError::Download(DownloadError::AllAttemptsFailed))
+        Err(DownloadError::AllAttemptsFailed)?
     }
 }

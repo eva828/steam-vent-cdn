@@ -7,7 +7,7 @@ use url::Url;
 
 use steam_vent_cdn::downloader::client::CdnDownloader;
 use steam_vent_cdn::downloader::{ItemDetails, Manifest, VersionInfo};
-use steam_vent_cdn::error::{Result, SteamVentError, WorkshopError};
+use steam_vent_cdn::error::{Result, WorkshopError};
 
 use super::progress::ProgressManager;
 use super::{Args, ui, writer};
@@ -65,15 +65,13 @@ async fn resolve_version(
                 return Ok(version);
             }
         }
-        Err(SteamVentError::Workshop(WorkshopError::VersionNotFound(
-            format!("Timestamp {}", ts),
-        )))
+        Err(WorkshopError::VersionNotFound(format!("Timestamp {}", ts)))?
     } else {
-        downloader
+        Ok(downloader
             .fetch_versions(item_id, Some(1))
             .try_next()
             .await?
-            .ok_or_else(|| SteamVentError::Workshop(WorkshopError::NoVersionsFound))
+            .ok_or(WorkshopError::NoVersionsFound)?)
     }
 }
 
@@ -137,10 +135,7 @@ async fn download_cdn_files(
 
     while let Some(result) = tasks.join_next().await {
         result.map_err(|e| {
-            SteamVentError::Io(std::io::Error::other(format!(
-                "File download task panicked: {}",
-                e
-            )))
+            std::io::Error::other(format!("File download task panicked: {}", e))
         })??;
     }
 

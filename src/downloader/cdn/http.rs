@@ -17,10 +17,10 @@ impl CdnFetcher {
             .http2_prior_knowledge()
             .build()
             .map_err(|e| {
-                SteamVentError::Download(DownloadError::InvalidConfiguration(format!(
+                DownloadError::InvalidConfiguration(format!(
                     "Failed to build HTTP client: {}",
                     e
-                )))
+                ))
             })?;
         Ok(Self {
             http_client,
@@ -60,7 +60,7 @@ impl CdnFetcher {
                         headers.join(", "),
                         body_preview
                     );
-                    return Err(SteamVentError::Download(DownloadError::HttpError { status }));
+                    return Err(DownloadError::HttpError { status })?;
                 }
                 resp.bytes().await.map_err(SteamVentError::from)
             }
@@ -82,7 +82,7 @@ impl CdnFetcher {
                 }
             }
         }
-        Err(SteamVentError::Download(DownloadError::AllServersFailed))
+        Err(DownloadError::AllServersFailed)?
     }
 
     pub(crate) async fn download_chunk(
@@ -190,7 +190,7 @@ impl CdnFetcher {
                     max_attempts,
                     healthy
                 );
-                return Err(SteamVentError::Download(DownloadError::AllServersFailed));
+                return Err(DownloadError::AllServersFailed)?;
             }
         }
     }

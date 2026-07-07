@@ -8,7 +8,7 @@ use crate::downloader::cdn::http::CdnFetcher;
 use crate::downloader::cdn::servers::RoundRobin;
 use crate::downloader::manifest::ChunkInfo;
 use crate::downloader::progress::ProgressCallback;
-use crate::error::{DownloadError, Result, SteamVentError};
+use crate::error::{DownloadError, Result};
 
 pub(crate) type ChunkFetchFuture = Pin<Box<dyn Future<Output = Result<(usize, Vec<u8>)>> + Send>>;
 
@@ -34,7 +34,7 @@ pub(crate) fn build_fetch_future(
         let _permit = download_sem
             .acquire()
             .await
-            .map_err(|_| SteamVentError::Download(DownloadError::SemaphoreClosed))?;
+            .map_err(|_| DownloadError::SemaphoreClosed)?;
 
         let compressed_data = http_fetcher
             .download_chunk(&RoundRobin::new(&depot.servers), depot.depot_id, &chunk_id)
@@ -57,6 +57,6 @@ pub(crate) fn build_fetch_future(
         });
 
         rx.await
-            .map_err(|_| SteamVentError::Download(DownloadError::AllServersFailed))?
+            .map_err(|_| DownloadError::AllServersFailed)?
     })
 }

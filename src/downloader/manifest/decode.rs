@@ -2,7 +2,7 @@ use crate::downloader::archive::{ArchiveExtractor, ZipArchiveExtractor};
 use crate::downloader::cdn::DepotContext;
 use crate::downloader::manifest::cipher::ManifestCipher;
 use crate::downloader::manifest::types::{ChunkInfo, ManifestEntry};
-use crate::error::{ManifestError, Result, SteamVentError};
+use crate::error::{ManifestError, Result};
 use std::sync::Arc;
 use steam_vent_proto::content_manifest::{ContentManifestMetadata, ContentManifestPayload};
 use steam_vent_proto::protobuf::Message;
@@ -49,12 +49,10 @@ impl RawManifest {
                     length,
                     data.len()
                 );
-                return Err(SteamVentError::Manifest(
-                    ManifestError::SegmentLengthExceeded {
-                        length,
-                        remaining: data.len(),
-                    },
-                ));
+                return Err(ManifestError::SegmentLengthExceeded {
+                    length,
+                    remaining: data.len(),
+                })?;
             }
 
             let (segment_data, rest) = data.split_at(length);
@@ -65,7 +63,7 @@ impl RawManifest {
             } else if magic == MAGIC_METADATA_1 || magic == MAGIC_METADATA_2 {
                 tracing::debug!("Decoding Metadata segment");
                 let m = ContentManifestMetadata::parse_from_bytes(segment_data)
-                    .map_err(|e| SteamVentError::Manifest(ManifestError::Decode(e.to_string())))?;
+                    .map_err(|e| ManifestError::Decode(e.to_string()))?;
                 tracing::debug!(
                     "Metadata: Names encrypted: {:?}, Depot ID: {:?}",
                     m.filenames_encrypted,
@@ -76,9 +74,7 @@ impl RawManifest {
                 tracing::debug!("Found Signature segment (skipping)");
             } else {
                 tracing::error!("Unknown segment magic: 0x{:08X}", magic);
-                return Err(SteamVentError::Manifest(
-                    ManifestError::UnknownSegmentMagic(magic),
-                ));
+                return Err(ManifestError::UnknownSegmentMagic(magic))?;
             }
 
             payload_bytes = rest;
@@ -86,34 +82,31 @@ impl RawManifest {
 
         if final_payload.is_empty() {
             tracing::error!("No Payload segment found, manifest is invalid");
-            return Err(SteamVentError::Manifest(ManifestError::MissingPayload));
+            return Err(ManifestError::MissingPayload)?;
         }
 
         let payload = ContentManifestPayload::parse_from_bytes(&final_payload)
-            .map_err(|e| SteamVentError::Manifest(ManifestError::Decode(e.to_string())))?;
+            .map_err(|e| ManifestError::Decode(e.to_string()))?;
 
         Ok(Self { payload, metadata })
     }
 
     pub(crate) fn filenames_encrypted(&self) -> Result<bool> {
         match &self.metadata {
-            Some(m) => m.filenames_encrypted.ok_or_else(|| {
-                SteamVentError::Manifest(ManifestError::MissingField(
-                    "metadata.filenames_encrypted",
-                ))
-            }),
+            Some(m) => Ok(m.filenames_encrypted.ok_or(ManifestError::MissingField(
+                "metadata.filenames_encrypted",
+            ))?),
             None => Ok(false),
         }
     }
 
     pub(crate) fn depot_id_for_key(&self, fallback: u32) -> Result<u32> {
         if self.filenames_encrypted()? {
-            self.metadata
+            Ok(self
+                .metadata
                 .as_ref()
                 .and_then(|m| m.depot_id)
-                .ok_or_else(|| {
-                    SteamVentError::Manifest(ManifestError::MissingField("metadata.depot_id"))
-                })
+                .ok_or(ManifestError::MissingField("metadata.depot_id"))?)
         } else {
             Ok(fallback)
         }
@@ -128,9 +121,9 @@ impl RawManifest {
         let mut entries = Vec::new();
 
         for mut mapping in self.payload.mappings {
-            let filename = mapping.filename.take().ok_or_else(|| {
-                SteamVentError::Manifest(ManifestError::MissingField("mapping.filename"))
-            })?;
+            let filename = mapping.filename.take().ok_or(ManifestError::MissingField(
+                "mapping.filename",
+            ))?;
             let filename = filename.replace('\\', "/");
             let chunks: Vec<ChunkInfo> = mapping
                 .chunks

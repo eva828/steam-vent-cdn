@@ -17,21 +17,11 @@ impl TryFrom<ChunkData> for ChunkInfo {
 
     fn try_from(mut c: ChunkData) -> Result<Self> {
         Ok(ChunkInfo {
-            sha1: c.sha.take().ok_or_else(|| {
-                SteamVentError::Manifest(ManifestError::MissingField("chunk.sha"))
-            })?,
-            crc: c.crc.take().ok_or_else(|| {
-                SteamVentError::Manifest(ManifestError::MissingField("chunk.crc"))
-            })?,
-            offset: c.offset.take().ok_or_else(|| {
-                SteamVentError::Manifest(ManifestError::MissingField("chunk.offset"))
-            })?,
-            uncompressed_size: c.cb_original.take().ok_or_else(|| {
-                SteamVentError::Manifest(ManifestError::MissingField("chunk.cb_original"))
-            })?,
-            compressed_size: c.cb_compressed.take().ok_or_else(|| {
-                SteamVentError::Manifest(ManifestError::MissingField("chunk.cb_compressed"))
-            })?,
+            sha1: c.sha.take().ok_or(ManifestError::MissingField("chunk.sha"))?,
+            crc: c.crc.take().ok_or(ManifestError::MissingField("chunk.crc"))?,
+            offset: c.offset.take().ok_or(ManifestError::MissingField("chunk.offset"))?,
+            uncompressed_size: c.cb_original.take().ok_or(ManifestError::MissingField("chunk.cb_original"))?,
+            compressed_size: c.cb_compressed.take().ok_or(ManifestError::MissingField("chunk.cb_compressed"))?,
         })
     }
 }

@@ -2,7 +2,7 @@ use crate::downloader::cdn::DepotContext;
 use crate::downloader::client::CdnDownloader;
 use crate::downloader::manifest::decode::RawManifest;
 use crate::downloader::manifest::types::Manifest;
-use crate::error::{Result, SteamVentError, WorkshopError};
+use crate::error::{Result, WorkshopError};
 use std::sync::Arc;
 
 impl CdnDownloader {
@@ -73,9 +73,9 @@ impl CdnDownloader {
 
     pub async fn fetch_latest_manifest_id(&self, item_id: u64) -> Result<u64> {
         let details = self.fetch_item_details(item_id).await?;
-        details
+        Ok(details
             .manifest_id
-            .ok_or_else(|| SteamVentError::Workshop(WorkshopError::MissingManifestId))
+            .ok_or(WorkshopError::MissingManifestId)?)
     }
 
     pub async fn fetch_manifest_info(&self, item_id: u64, manifest_id: u64) -> Result<Manifest> {
@@ -85,7 +85,7 @@ impl CdnDownloader {
 
         let app_id = details
             .consumer_appid
-            .ok_or_else(|| SteamVentError::Workshop(WorkshopError::MissingConsumerAppId))?;
+            .ok_or(WorkshopError::MissingConsumerAppId)?;
 
         self.fetch_manifest_by_id(manifest_id, app_id).await
     }

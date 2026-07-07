@@ -82,24 +82,22 @@ impl<'a> VZaArchiveExtractor<'a> {
 impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
     fn extract(&self) -> Result<Vec<u8>> {
         if !self.data.starts_with(Self::MAGIC) {
-            return Err(SteamVentError::Compression(
-                CompressionError::InvalidLzmaHeader("Not VZa format"),
-            ));
+            return Err(CompressionError::InvalidLzmaHeader("Not VZa format"))?;
         }
 
         let footer_zv = &self.data[self.data.len() - 2..];
         if footer_zv != b"zv" {
-            return Err(SteamVentError::Compression(
-                CompressionError::InvalidLzmaHeader("VZa footer does not end with 'zv'"),
-            ));
+            return Err(CompressionError::InvalidLzmaHeader(
+                "VZa footer does not end with 'zv'",
+            ))?;
         }
 
         let uncompressed_size_bytes = &self.data[self.data.len() - 6..self.data.len() - 2];
         let uncompressed_size =
             u32::from_le_bytes(uncompressed_size_bytes.try_into().map_err(|_| {
-                SteamVentError::Compression(CompressionError::InvalidLzmaHeader(
+                CompressionError::InvalidLzmaHeader(
                     "Failed to parse uncompressed size from VZa footer",
-                ))
+                )
             })?) as usize;
 
         let compressed_end = self.data.len() - 10;
@@ -115,7 +113,7 @@ impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
         if let Err(e) =
             lzma_rs::lzma_decompress_with_options(&mut reader, &mut decompressed, &options)
         {
-            return Err(SteamVentError::Compression(CompressionError::Lzma(e)));
+            return Err(CompressionError::Lzma(e))?;
         }
 
         tracing::debug!(
@@ -205,14 +203,14 @@ impl SteamChunk {
                     Ok(Self::Decrypted(data))
                 }
             }
-            Self::Decrypted(_) => Err(SteamVentError::Chunk(ChunkError::UnexpectedState {
+            Self::Decrypted(_) => Err(ChunkError::UnexpectedState {
                 expected: "Encrypted",
                 actual: "Decrypted",
-            })),
-            Self::Decompressed(_) => Err(SteamVentError::Chunk(ChunkError::UnexpectedState {
+            })?,
+            Self::Decompressed(_) => Err(ChunkError::UnexpectedState {
                 expected: "Encrypted",
                 actual: "Decompressed",
-            })),
+            })?,
         }
     }
 
@@ -228,32 +226,32 @@ impl SteamChunk {
 
                 let actual_size = decompressed.len() as u32;
                 if actual_size != expected_uncompressed_size {
-                    return Err(SteamVentError::Chunk(ChunkError::SizeMismatch {
+                    return Err(ChunkError::SizeMismatch {
                         expected: expected_uncompressed_size,
                         actual: actual_size,
-                    }));
+                    })?;
                 }
 
                 let mut hasher = adler::Adler32::from_checksum(0);
                 hasher.write_slice(&decompressed);
                 let actual_crc = hasher.checksum();
                 if actual_crc != expected_crc {
-                    return Err(SteamVentError::Chunk(ChunkError::ChecksumMismatch {
+                    return Err(ChunkError::ChecksumMismatch {
                         expected: expected_crc,
                         actual: actual_crc,
-                    }));
+                    })?;
                 }
 
                 Ok(Self::Decompressed(decompressed))
             }
-            Self::Encrypted(_) => Err(SteamVentError::Chunk(ChunkError::UnexpectedState {
+            Self::Encrypted(_) => Err(ChunkError::UnexpectedState {
                 expected: "Decrypted",
                 actual: "Encrypted",
-            })),
-            Self::Decompressed(_) => Err(SteamVentError::Chunk(ChunkError::UnexpectedState {
+            })?,
+            Self::Decompressed(_) => Err(ChunkError::UnexpectedState {
                 expected: "Decrypted",
                 actual: "Decompressed",
-            })),
+            })?,
         }
     }
 
@@ -281,13 +279,13 @@ impl SteamChunk {
             Ok(decrypted) => Ok(decrypted.to_vec()),
             Err(_) => {
                 let magic_bytes = &data[..data.len().min(4)];
-                Err(SteamVentError::Encryption(EncryptionError::Decrypt(
+                Err(EncryptionError::Decrypt(
                     format!(
                         "Chunk decryption failed: unpadding error (input size: {} bytes, magic bytes: {:02X?})",
                         data.len(),
                         magic_bytes
                     ),
-                )))
+                ))?
             }
         }
     }
