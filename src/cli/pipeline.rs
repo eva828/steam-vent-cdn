@@ -83,7 +83,7 @@ fn extract_filename(details: &ItemDetails, file_url: &str) -> String {
         .ok()
         .and_then(|u| {
             u.path_segments()?
-                .last()
+                .next_back()
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string())
         })

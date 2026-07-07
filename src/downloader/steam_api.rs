@@ -148,7 +148,7 @@ impl CdnDownloader {
             const PAGE_SIZE: u32 = 100;
             let mut offset = 0u32;
 
-            while max.map_or(true, |m| offset < m) {
+            while max.is_none_or(|m| offset < m) {
                 let request_count = max
                     .map(|m| (m - offset).min(PAGE_SIZE))
                     .unwrap_or(PAGE_SIZE);
