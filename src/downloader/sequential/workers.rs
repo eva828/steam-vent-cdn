@@ -6,8 +6,8 @@ use crate::downloader::archive::SteamChunk;
 use crate::downloader::cdn::http::CdnFetcher;
 use crate::downloader::cdn::servers::RoundRobin;
 use crate::downloader::manifest::ManifestEntry;
-use crate::downloader::sequential::models::{DecodedChunk, RawChunk};
-use crate::error::{DownloadError, Result};
+use crate::downloader::sequential::models::{self, DecodedChunk, RawChunk};
+use crate::error::{DownloadError, Result, SteamVentError};
 
 pub(crate) fn spawn_chunk_downloads(
     http_fetcher: &CdnFetcher,
@@ -15,6 +15,7 @@ pub(crate) fn spawn_chunk_downloads(
     progress: &Arc<dyn ProgressCallback>,
     entry: &ManifestEntry,
     download_tx: tokio::sync::mpsc::Sender<Result<RawChunk>>,
+    cancel_rx: tokio::sync::watch::Receiver<bool>,
 ) {
     let depot_id = entry.depot.depot_id;
     let depot_key = entry.depot.depot_key.clone();
@@ -33,20 +34,29 @@ pub(crate) fn spawn_chunk_downloads(
         let depot_key = depot_key.clone();
         let depot = Arc::clone(&entry.depot);
 
+        let mut cancel_rx = cancel_rx.clone();
+
         tokio::spawn(async move {
-            let _permit = match download_sem.acquire().await {
-                Ok(permit) => permit,
-                Err(_) => {
-                    let _ = download_tx
-                        .send(Err(DownloadError::SemaphoreClosed.into()))
-                        .await;
-                    return;
-                }
+            let _permit = tokio::select! {
+                result = download_sem.acquire() => match result {
+                    Ok(permit) => permit,
+                    Err(_) => {
+                        let _ = download_tx
+                            .send(Err(DownloadError::SemaphoreClosed.into()))
+                            .await;
+                        return;
+                    }
+                },
+                _ = cancel_rx.changed() => return,
             };
 
-            let result = http_fetcher
-                .download_chunk(&RoundRobin::new(&depot.servers), depot_id, &chunk_id)
-                .await;
+            let server_list = RoundRobin::new(&depot.servers);
+            let result = tokio::select! {
+                r = http_fetcher.download_chunk(
+                    &server_list, depot_id, &chunk_id,
+                ) => r,
+                _ = cancel_rx.changed() => return,
+            };
 
             match result {
                 Ok(data) => {
@@ -73,44 +83,83 @@ pub(crate) async fn run_decrypt_decode_loop(
     mut download_rx: tokio::sync::mpsc::Receiver<Result<RawChunk>>,
     decoded_tx: tokio::sync::mpsc::Sender<Result<DecodedChunk>>,
     progress: Arc<dyn ProgressCallback>,
+    cancel_tx: tokio::sync::watch::Sender<bool>,
+    mut cancel_rx: tokio::sync::watch::Receiver<bool>,
 ) {
-    while let Some(result) = download_rx.recv().await {
+    loop {
+        let result = tokio::select! {
+            result = download_rx.recv() => result,
+            _ = cancel_rx.changed() => return,
+        };
+
         match result {
-            Ok(raw) => {
+            Some(Ok(raw)) => {
                 let decoded_tx = decoded_tx.clone();
                 let progress = progress.clone();
 
                 rayon::spawn(move || {
-                    let result = SteamChunk::new(raw.compressed_data)
-                        .decrypt(raw.depot_key.as_deref())
-                        .and_then(|chunk| {
-                            chunk.decompress_and_verify(raw.uncompressed_size, raw.crc)
-                        });
+                    let result =
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            SteamChunk::new(raw.compressed_data)
+                                .decrypt(raw.depot_key.as_deref())
+                                .and_then(|chunk| {
+                                    chunk.decompress_and_verify(
+                                        raw.uncompressed_size,
+                                        raw.crc,
+                                    )
+                                })
+                        }));
 
                     match result {
-                        Ok(chunk) => {
+                        Ok(Ok(chunk)) => {
                             let data = chunk.into_vec();
                             progress.on_decode_progress(data.len() as u64);
                             if let Err(e) = decoded_tx.blocking_send(Ok(DecodedChunk {
                                 chunk_offset: raw.chunk_offset,
                                 data,
                             })) {
-                                tracing::error!("Failed to send decoded chunk: {}", e);
+                                tracing::error!(
+                                    "Failed to send decoded chunk: {}",
+                                    e
+                                );
                             }
                         }
-                        Err(e) => {
-                            if let Err(send_err) = decoded_tx.blocking_send(Err(e)) {
-                                tracing::error!("Failed to send decode error: {}", send_err);
+                        Ok(Err(e)) => {
+                            if let Err(send_err) =
+                                decoded_tx.blocking_send(Err(e))
+                            {
+                                tracing::error!(
+                                    "Failed to send decode error: {}",
+                                    send_err
+                                );
+                            }
+                        }
+                        Err(panic_payload) => {
+                            let msg = models::panic_msg(panic_payload);
+                            if let Err(send_err) = decoded_tx
+                                .blocking_send(Err(SteamVentError::InternalPanic(
+                                    msg,
+                                ))) {
+                                tracing::error!(
+                                    "Failed to send panic error: {}",
+                                    send_err
+                                );
                             }
                         }
                     }
                 });
             }
-            Err(e) => {
+            Some(Err(e)) => {
+                cancel_tx.send(true).ok();
                 if let Err(send_err) = decoded_tx.send(Err(e)).await {
-                    tracing::error!("Failed to send decode stream error: {}", send_err);
+                    tracing::error!(
+                        "Failed to send decode stream error: {}",
+                        send_err
+                    );
                 }
+                return;
             }
+            None => break,
         }
     }
 }
@@ -121,6 +170,7 @@ pub(crate) async fn run_reassembly_loop(
     progress: Arc<dyn ProgressCallback>,
     filename: String,
     total_chunks: usize,
+    cancel_tx: tokio::sync::watch::Sender<bool>,
 ) {
     let mut next_offset: u64 = 0;
     let mut pending: BTreeMap<u64, Vec<u8>> = BTreeMap::new();
@@ -158,6 +208,7 @@ pub(crate) async fn run_reassembly_loop(
                 }
             }
             Err(e) => {
+                cancel_tx.send(true).ok();
                 tracing::error!("Error in decode stream: {}", e);
                 let _ = output_tx.send(Err(e)).await;
                 return;

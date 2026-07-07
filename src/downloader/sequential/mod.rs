@@ -34,24 +34,37 @@ impl DownloadPipeline {
         let (output_tx, output_rx) =
             tokio::sync::mpsc::channel::<Result<Vec<u8>>>(output_channel_size);
 
+        let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
         let mut handles = tokio::task::JoinSet::new();
 
+        let cancel_rx_downloads = cancel_rx.clone();
         spawn_chunk_downloads(
             &self.http_fetcher,
             &self.download_sem,
             &self.progress,
             entry,
             download_tx,
+            cancel_rx_downloads,
         );
 
         let progress_decode = Arc::clone(&self.progress);
+        let cancel_tx_decode = cancel_tx.clone();
+        let cancel_rx_decode = cancel_rx.clone();
         handles.spawn(async move {
-            run_decrypt_decode_loop(download_rx, decoded_tx, progress_decode).await;
+            run_decrypt_decode_loop(
+                download_rx,
+                decoded_tx,
+                progress_decode,
+                cancel_tx_decode,
+                cancel_rx_decode,
+            )
+            .await;
         });
 
         let progress_reassembly = Arc::clone(&self.progress);
         let filename = entry.filename.clone();
         let total_chunks = entry.chunks.len();
+        let cancel_tx_reassembly = cancel_tx.clone();
         handles.spawn(async move {
             run_reassembly_loop(
                 decoded_rx,
@@ -59,6 +72,7 @@ impl DownloadPipeline {
                 progress_reassembly,
                 filename,
                 total_chunks,
+                cancel_tx_reassembly,
             )
             .await;
         });
@@ -68,6 +82,7 @@ impl DownloadPipeline {
             entry.size,
             output_rx,
             handles,
+            cancel_tx,
         ))
     }
 }

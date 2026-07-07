@@ -181,6 +181,9 @@ pub enum SteamVentError {
 
     #[error("IO error")]
     Io(#[from] std::io::Error),
+
+    #[error("Internal task panicked: {0}")]
+    InternalPanic(String),
 }
 
 pub type Result<T> = std::result::Result<T, SteamVentError>;
