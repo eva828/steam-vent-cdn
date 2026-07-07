@@ -17,10 +17,7 @@ impl CdnFetcher {
             .http2_prior_knowledge()
             .build()
             .map_err(|e| {
-                DownloadError::InvalidConfiguration(format!(
-                    "Failed to build HTTP client: {}",
-                    e
-                ))
+                DownloadError::InvalidConfiguration(format!("Failed to build HTTP client: {}", e))
             })?;
         Ok(Self {
             http_client,

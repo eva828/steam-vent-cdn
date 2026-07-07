@@ -73,9 +73,7 @@ impl Stream for FileByteStream {
                         "background task was cancelled".to_string()
                     };
                     self.cancel_tx.send(true).ok();
-                    return Poll::Ready(Some(Err(SteamVentError::InternalPanic(
-                        msg,
-                    ))));
+                    return Poll::Ready(Some(Err(SteamVentError::InternalPanic(msg))));
                 }
                 Poll::Ready(Some(Ok(()))) => continue,
                 Poll::Ready(None) | Poll::Pending => break,

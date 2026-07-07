@@ -1,10 +1,10 @@
 pub mod cdn;
 pub mod client;
 pub mod manifest;
-pub mod web;
 pub mod progress;
 pub mod random_access;
 pub mod sequential;
+pub mod web;
 
 pub use cdn::DepotContext;
 pub use client::CdnDownloader;

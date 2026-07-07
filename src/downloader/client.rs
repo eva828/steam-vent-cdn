@@ -3,9 +3,9 @@ use std::sync::Arc;
 use crate::connection::SteamSession;
 use crate::downloader::cdn::http::CdnFetcher;
 use crate::downloader::cdn::servers::ContentServerList;
-use crate::downloader::web::HttpFetcher;
 use crate::downloader::manifest::ManifestEntry;
 use crate::downloader::random_access::CdnRandomAccessReader;
+use crate::downloader::web::HttpFetcher;
 use crate::downloader::{DownloadPipeline, ProgressCallback};
 use crate::error::Result;
 

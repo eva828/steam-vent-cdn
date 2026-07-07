@@ -134,9 +134,8 @@ async fn download_cdn_files(
     }
 
     while let Some(result) = tasks.join_next().await {
-        result.map_err(|e| {
-            std::io::Error::other(format!("File download task panicked: {}", e))
-        })??;
+        result
+            .map_err(|e| std::io::Error::other(format!("File download task panicked: {}", e)))??;
     }
 
     progress.finish();

@@ -14,10 +14,7 @@ impl HttpFetcher {
             .timeout(config.timeout)
             .build()
             .map_err(|e| {
-                DownloadError::InvalidConfiguration(format!(
-                    "Failed to build HTTP client: {}",
-                    e
-                ))
+                DownloadError::InvalidConfiguration(format!("Failed to build HTTP client: {}", e))
             })?;
         Ok(Self { client, config })
     }

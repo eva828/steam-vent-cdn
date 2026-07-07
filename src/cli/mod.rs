@@ -77,9 +77,8 @@ pub fn resolve_credentials(
     match (username, password) {
         (Some(username), Some(password)) => Ok(Credentials::UserPass { username, password }),
         (Some(username), None) => {
-            let password = rpassword::prompt_password("Password: ").map_err(|e| {
-                std::io::Error::other(format!("Password input failed: {}", e))
-            })?;
+            let password = rpassword::prompt_password("Password: ")
+                .map_err(|e| std::io::Error::other(format!("Password input failed: {}", e)))?;
             Ok(Credentials::UserPass { username, password })
         }
         _ => Ok(Credentials::Anonymous),

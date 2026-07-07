@@ -93,9 +93,9 @@ impl RawManifest {
 
     pub(crate) fn filenames_encrypted(&self) -> Result<bool> {
         match &self.metadata {
-            Some(m) => Ok(m.filenames_encrypted.ok_or(ManifestError::MissingField(
-                "metadata.filenames_encrypted",
-            ))?),
+            Some(m) => Ok(m
+                .filenames_encrypted
+                .ok_or(ManifestError::MissingField("metadata.filenames_encrypted"))?),
             None => Ok(false),
         }
     }
@@ -121,9 +121,10 @@ impl RawManifest {
         let mut entries = Vec::new();
 
         for mut mapping in self.payload.mappings {
-            let filename = mapping.filename.take().ok_or(ManifestError::MissingField(
-                "mapping.filename",
-            ))?;
+            let filename = mapping
+                .filename
+                .take()
+                .ok_or(ManifestError::MissingField("mapping.filename"))?;
             let filename = filename.replace('\\', "/");
             let chunks: Vec<ChunkInfo> = mapping
                 .chunks

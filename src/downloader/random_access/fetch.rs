@@ -56,7 +56,6 @@ pub(crate) fn build_fetch_future(
             let _ = tx.send(result);
         });
 
-        rx.await
-            .map_err(|_| DownloadError::AllServersFailed)?
+        rx.await.map_err(|_| DownloadError::AllServersFailed)?
     })
 }

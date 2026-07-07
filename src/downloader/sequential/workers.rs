@@ -98,17 +98,13 @@ pub(crate) async fn run_decrypt_decode_loop(
                 let progress = progress.clone();
 
                 rayon::spawn(move || {
-                    let result =
-                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            SteamChunk::new(raw.compressed_data)
-                                .decrypt(raw.depot_key.as_deref())
-                                .and_then(|chunk| {
-                                    chunk.decompress_and_verify(
-                                        raw.uncompressed_size,
-                                        raw.crc,
-                                    )
-                                })
-                        }));
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        SteamChunk::new(raw.compressed_data)
+                            .decrypt(raw.depot_key.as_deref())
+                            .and_then(|chunk| {
+                                chunk.decompress_and_verify(raw.uncompressed_size, raw.crc)
+                            })
+                    }));
 
                     match result {
                         Ok(Ok(chunk)) => {
@@ -118,32 +114,20 @@ pub(crate) async fn run_decrypt_decode_loop(
                                 chunk_offset: raw.chunk_offset,
                                 data,
                             })) {
-                                tracing::error!(
-                                    "Failed to send decoded chunk: {}",
-                                    e
-                                );
+                                tracing::error!("Failed to send decoded chunk: {}", e);
                             }
                         }
                         Ok(Err(e)) => {
-                            if let Err(send_err) =
-                                decoded_tx.blocking_send(Err(e))
-                            {
-                                tracing::error!(
-                                    "Failed to send decode error: {}",
-                                    send_err
-                                );
+                            if let Err(send_err) = decoded_tx.blocking_send(Err(e)) {
+                                tracing::error!("Failed to send decode error: {}", send_err);
                             }
                         }
                         Err(panic_payload) => {
                             let msg = models::panic_msg(panic_payload);
-                            if let Err(send_err) = decoded_tx
-                                .blocking_send(Err(SteamVentError::InternalPanic(
-                                    msg,
-                                ))) {
-                                tracing::error!(
-                                    "Failed to send panic error: {}",
-                                    send_err
-                                );
+                            if let Err(send_err) =
+                                decoded_tx.blocking_send(Err(SteamVentError::InternalPanic(msg)))
+                            {
+                                tracing::error!("Failed to send panic error: {}", send_err);
                             }
                         }
                     }
@@ -152,10 +136,7 @@ pub(crate) async fn run_decrypt_decode_loop(
             Some(Err(e)) => {
                 cancel_tx.send(true).ok();
                 if let Err(send_err) = decoded_tx.send(Err(e)).await {
-                    tracing::error!(
-                        "Failed to send decode stream error: {}",
-                        send_err
-                    );
+                    tracing::error!("Failed to send decode stream error: {}", send_err);
                 }
                 return;
             }
@@ -225,14 +206,12 @@ pub(crate) async fn run_reassembly_loop(
             total_chunks,
         );
         let _ = output_tx
-            .send(Err(
-                DownloadError::IncompleteDownload {
-                    filename,
-                    received,
-                    total: total_chunks,
-                }
-                .into(),
-            ))
+            .send(Err(DownloadError::IncompleteDownload {
+                filename,
+                received,
+                total: total_chunks,
+            }
+            .into()))
             .await;
     }
 }

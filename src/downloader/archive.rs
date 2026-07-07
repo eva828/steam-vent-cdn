@@ -19,7 +19,9 @@ impl<'a> ZipArchiveExtractor<'a> {
 
     pub(crate) fn new(data: &'a [u8]) -> Result<Self> {
         if !data.starts_with(Self::MAGIC) {
-            return Err(CompressionError::InvalidMagic { expected: Self::MAGIC })?;
+            return Err(CompressionError::InvalidMagic {
+                expected: Self::MAGIC,
+            })?;
         }
         Ok(Self { data })
     }
@@ -49,10 +51,13 @@ impl<'a> ZstdArchiveExtractor<'a> {
     pub const MAGIC: &'static [u8] = b"VSZa";
 
     pub(crate) fn new(data: &'a [u8]) -> Result<Self> {
-        let (magic, _rest) = data.split_first_chunk::<4>()
+        let (magic, _rest) = data
+            .split_first_chunk::<4>()
             .ok_or(CompressionError::InvalidData("Zstd data too short"))?;
         if magic != Self::MAGIC {
-            return Err(CompressionError::InvalidMagic { expected: Self::MAGIC })?;
+            return Err(CompressionError::InvalidMagic {
+                expected: Self::MAGIC,
+            })?;
         }
         Ok(Self { data })
     }
@@ -60,10 +65,12 @@ impl<'a> ZstdArchiveExtractor<'a> {
 
 impl<'a> ArchiveExtractor for ZstdArchiveExtractor<'a> {
     fn extract(&self) -> Result<Vec<u8>> {
-        let (_header, zstd_payload) = self.data.split_first_chunk::<8>()
-            .ok_or(CompressionError::InvalidData(
-                "Zstd data too short for header",
-            ))?;
+        let (_header, zstd_payload) =
+            self.data
+                .split_first_chunk::<8>()
+                .ok_or(CompressionError::InvalidData(
+                    "Zstd data too short for header",
+                ))?;
         let mut decompressed = Vec::new();
         let mut decoder = zstd::stream::Decoder::new(Cursor::new(zstd_payload))
             .map_err(CompressionError::Zstd)?
@@ -86,10 +93,13 @@ impl<'a> VZaArchiveExtractor<'a> {
     pub const MAGIC: &'static [u8] = b"VZa";
 
     pub(crate) fn new(data: &'a [u8]) -> Result<Self> {
-        let (magic, _rest) = data.split_first_chunk::<3>()
+        let (magic, _rest) = data
+            .split_first_chunk::<3>()
             .ok_or(CompressionError::InvalidData("VZa data too short"))?;
         if magic != Self::MAGIC {
-            return Err(CompressionError::InvalidMagic { expected: Self::MAGIC })?;
+            return Err(CompressionError::InvalidMagic {
+                expected: Self::MAGIC,
+            })?;
         }
         Ok(Self { data })
     }
@@ -97,27 +107,34 @@ impl<'a> VZaArchiveExtractor<'a> {
 
 impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
     fn extract(&self) -> Result<Vec<u8>> {
-        let (_header, rest) = self.data.split_first_chunk::<7>()
-            .ok_or(CompressionError::InvalidData(
-                "VZa data too short for header",
-            ))?;
-        let (compressed, footer) = rest.split_last_chunk::<10>()
-            .ok_or(CompressionError::InvalidData(
-                "VZa data too short for footer",
-            ))?;
-        let (rest_of_footer, zv_magic) = footer.split_last_chunk::<2>()
-            .ok_or(CompressionError::InvalidData(
-                "VZa data too short for footer magic",
-            ))?;
+        let (_header, rest) =
+            self.data
+                .split_first_chunk::<7>()
+                .ok_or(CompressionError::InvalidData(
+                    "VZa data too short for header",
+                ))?;
+        let (compressed, footer) =
+            rest.split_last_chunk::<10>()
+                .ok_or(CompressionError::InvalidData(
+                    "VZa data too short for footer",
+                ))?;
+        let (rest_of_footer, zv_magic) =
+            footer
+                .split_last_chunk::<2>()
+                .ok_or(CompressionError::InvalidData(
+                    "VZa data too short for footer magic",
+                ))?;
         if zv_magic != b"zv" {
             return Err(CompressionError::InvalidData(
                 "VZa footer does not end with 'zv'",
             ))?;
         }
-        let (_reserved, uncompressed_size_bytes) = rest_of_footer.split_last_chunk::<4>()
-            .ok_or(CompressionError::InvalidData(
-                "VZa data too short for uncompressed size",
-            ))?;
+        let (_reserved, uncompressed_size_bytes) =
+            rest_of_footer
+                .split_last_chunk::<4>()
+                .ok_or(CompressionError::InvalidData(
+                    "VZa data too short for uncompressed size",
+                ))?;
         let uncompressed_size = u32::from_le_bytes(*uncompressed_size_bytes) as usize;
 
         let mut decompressed = Vec::with_capacity(uncompressed_size);
@@ -152,7 +169,9 @@ impl<'a> LzmaArchiveExtractor<'a> {
 
     pub(crate) fn new(data: &'a [u8]) -> Result<Self> {
         if !data.starts_with(Self::MAGIC) {
-            return Err(CompressionError::InvalidMagic { expected: Self::MAGIC })?;
+            return Err(CompressionError::InvalidMagic {
+                expected: Self::MAGIC,
+            })?;
         }
         Ok(Self { data })
     }
@@ -315,15 +334,12 @@ impl SteamChunk {
             Ok(decrypted) => Ok(decrypted.to_vec()),
             Err(_) => {
                 let magic_bytes = &data[..data.len().min(4)];
-                Err(EncryptionError::Decrypt(
-                    format!(
-                        "Chunk decryption failed: unpadding error (input size: {} bytes, magic bytes: {:02X?})",
-                        data.len(),
-                        magic_bytes
-                    ),
-                ))?
+                Err(EncryptionError::Decrypt(format!(
+                    "Chunk decryption failed: unpadding error (input size: {} bytes, magic bytes: {:02X?})",
+                    data.len(),
+                    magic_bytes
+                )))?
             }
         }
     }
-
 }
