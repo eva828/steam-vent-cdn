@@ -46,12 +46,12 @@ pub(crate) struct ZstdArchiveExtractor<'a> {
 }
 
 impl<'a> ZstdArchiveExtractor<'a> {
-    const HEADER_LEN: usize = 8;
-
     pub const MAGIC: &'static [u8] = b"VSZa";
 
     pub(crate) fn new(data: &'a [u8]) -> Result<Self> {
-        if !data.starts_with(Self::MAGIC) {
+        let (magic, _rest) = data.split_first_chunk::<4>()
+            .ok_or(CompressionError::InvalidData("Zstd data too short"))?;
+        if magic != Self::MAGIC {
             return Err(CompressionError::InvalidMagic { expected: Self::MAGIC })?;
         }
         Ok(Self { data })
@@ -60,12 +60,10 @@ impl<'a> ZstdArchiveExtractor<'a> {
 
 impl<'a> ArchiveExtractor for ZstdArchiveExtractor<'a> {
     fn extract(&self) -> Result<Vec<u8>> {
-        if self.data.len() < Self::HEADER_LEN {
-            return Err(CompressionError::InvalidData(
+        let (_header, zstd_payload) = self.data.split_first_chunk::<8>()
+            .ok_or(CompressionError::InvalidData(
                 "Zstd data too short for header",
             ))?;
-        }
-        let zstd_payload = &self.data[8..];
         let mut decompressed = Vec::new();
         let mut decoder = zstd::stream::Decoder::new(Cursor::new(zstd_payload))
             .map_err(CompressionError::Zstd)?
@@ -85,12 +83,12 @@ pub(crate) struct VZaArchiveExtractor<'a> {
 }
 
 impl<'a> VZaArchiveExtractor<'a> {
-    const MIN_DATA_LEN: usize = 17;
-
     pub const MAGIC: &'static [u8] = b"VZa";
 
     pub(crate) fn new(data: &'a [u8]) -> Result<Self> {
-        if !data.starts_with(Self::MAGIC) {
+        let (magic, _rest) = data.split_first_chunk::<3>()
+            .ok_or(CompressionError::InvalidData("VZa data too short"))?;
+        if magic != Self::MAGIC {
             return Err(CompressionError::InvalidMagic { expected: Self::MAGIC })?;
         }
         Ok(Self { data })
@@ -99,26 +97,28 @@ impl<'a> VZaArchiveExtractor<'a> {
 
 impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
     fn extract(&self) -> Result<Vec<u8>> {
-        if self.data.len() < Self::MIN_DATA_LEN {
-            return Err(CompressionError::InvalidData("VZa data too short"))?;
-        }
-
-        let footer_zv = &self.data[self.data.len() - 2..];
-        if footer_zv != b"zv" {
+        let (_header, rest) = self.data.split_first_chunk::<7>()
+            .ok_or(CompressionError::InvalidData(
+                "VZa data too short for header",
+            ))?;
+        let (compressed, footer) = rest.split_last_chunk::<10>()
+            .ok_or(CompressionError::InvalidData(
+                "VZa data too short for footer",
+            ))?;
+        let (rest_of_footer, zv_magic) = footer.split_last_chunk::<2>()
+            .ok_or(CompressionError::InvalidData(
+                "VZa data too short for footer magic",
+            ))?;
+        if zv_magic != b"zv" {
             return Err(CompressionError::InvalidData(
                 "VZa footer does not end with 'zv'",
             ))?;
         }
-
-        let uncompressed_size_bytes = &self.data[self.data.len() - 6..self.data.len() - 2];
-        let uncompressed_size =
-            u32::from_le_bytes(uncompressed_size_bytes.try_into().map_err(|_| {
-                CompressionError::InvalidData(
-                    "Failed to parse uncompressed size from VZa footer",
-                )
-            })?) as usize;
-
-        let compressed_end = self.data.len() - 10;
+        let (_reserved, uncompressed_size_bytes) = rest_of_footer.split_last_chunk::<4>()
+            .ok_or(CompressionError::InvalidData(
+                "VZa data too short for uncompressed size",
+            ))?;
+        let uncompressed_size = u32::from_le_bytes(*uncompressed_size_bytes) as usize;
 
         let mut decompressed = Vec::with_capacity(uncompressed_size);
         let mut options: lzma_rs::decompress::Options = Default::default();
@@ -126,7 +126,7 @@ impl<'a> ArchiveExtractor for VZaArchiveExtractor<'a> {
             lzma_rs::decompress::UnpackedSize::UseProvided(Some(uncompressed_size as u64));
         options.unpacked_size = unpacked_size;
 
-        let mut reader = Cursor::new(&self.data[7..compressed_end]);
+        let mut reader = Cursor::new(compressed);
 
         if let Err(e) =
             lzma_rs::lzma_decompress_with_options(&mut reader, &mut decompressed, &options)
