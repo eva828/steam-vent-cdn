@@ -58,6 +58,9 @@ pub enum DownloadError {
         received: usize,
         total: usize,
     },
+
+    #[error("Gap in chunks: offset {offset} is not covered by any chunk")]
+    GapInChunks { offset: u64 },
 }
 
 #[derive(Error, Debug)]

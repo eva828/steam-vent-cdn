@@ -11,6 +11,7 @@ use crate::downloader::cdn::http::CdnFetcher;
 use crate::downloader::manifest::{ChunkInfo, ManifestEntry};
 use crate::downloader::progress::ProgressCallback;
 use crate::downloader::random_access::fetch::{ChunkFetchFuture, build_fetch_future};
+use crate::error::{DownloadError, Result};
 
 pub struct CdnRandomAccessReader {
     pub(crate) chunks: Vec<ChunkInfo>,
@@ -31,7 +32,7 @@ impl CdnRandomAccessReader {
         http_fetcher: CdnFetcher,
         download_sem: Arc<tokio::sync::Semaphore>,
         progress: Arc<dyn ProgressCallback>,
-    ) -> Self {
+    ) -> Result<Self> {
         let mut chunks = entry.chunks.clone();
         chunks.sort_unstable_by_key(|c| c.offset);
 
@@ -42,7 +43,9 @@ impl CdnRandomAccessReader {
                 .unwrap_or(0)
         });
 
-        Self {
+        Self::validate_chunk_coverage(&chunks, total_size)?;
+
+        Ok(Self {
             chunks,
             depot: Arc::clone(&entry.depot),
             http_fetcher,
@@ -53,6 +56,30 @@ impl CdnRandomAccessReader {
             pending_fetch: None,
             seek_pending: false,
             progress,
+        })
+    }
+
+    fn validate_chunk_coverage(chunks: &[ChunkInfo], total_size: u64) -> Result<()> {
+        let gap = chunks
+            .first()
+            .filter(|c| c.offset > 0)
+            .map(|_| 0)
+            .or_else(|| {
+                chunks.windows(2).find_map(|pair| {
+                    let prev_end = pair[0].offset + pair[0].uncompressed_size as u64;
+                    (prev_end < pair[1].offset).then_some(prev_end)
+                })
+            })
+            .or_else(|| {
+                chunks.last().and_then(|c| {
+                    let end = c.offset + c.uncompressed_size as u64;
+                    (end < total_size).then_some(end)
+                })
+            });
+
+        match gap {
+            Some(offset) => Err(DownloadError::GapInChunks { offset }.into()),
+            None => Ok(()),
         }
     }
 
@@ -99,7 +126,10 @@ impl AsyncRead for CdnRandomAccessReader {
             let chunk_idx = match self.chunk_index_for_offset(self.position) {
                 Some(idx) => idx,
                 None => {
-                    return Poll::Ready(Ok(()));
+                    return Poll::Ready(Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("gap in chunks at offset {}", self.position),
+                    )));
                 }
             };
 

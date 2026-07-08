@@ -55,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
         .ok_or_else(|| anyhow::anyhow!("File '{}' not found in manifest", filename))?;
 
     let progress = Arc::new(common::NoopProgress);
-    let mut reader = downloader.create_reader(&file, progress);
+    let mut reader = downloader.create_reader(&file, progress)?;
 
     reader.seek(SeekFrom::Start(offset)).await?;
     let mut buffer = vec![0u8; length];

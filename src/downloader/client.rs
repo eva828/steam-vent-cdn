@@ -49,7 +49,7 @@ impl CdnDownloader {
         &self,
         entry: &ManifestEntry,
         progress: Arc<dyn ProgressCallback>,
-    ) -> CdnRandomAccessReader {
+    ) -> Result<CdnRandomAccessReader> {
         CdnRandomAccessReader::new(
             entry,
             self.http_fetcher.clone(),
