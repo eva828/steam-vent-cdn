@@ -88,11 +88,9 @@ impl CdnFetcher {
         depot_id: u32,
         chunk_id: &str,
     ) -> Result<Vec<u8>> {
-        let mut attempt_count = 0;
-        let max_attempts =
-            std::cmp::max(self.config.retry_policy.max_retries, servers.len() as u32);
+        let max_attempts = self.config.retry_policy.max_retries + 1;
 
-        loop {
+        for attempt_count in 1..=max_attempts {
             let server_host = servers.next()?;
             let chunk_url = format!(
                 "https://{}/depot/{}/chunk/{}",
@@ -103,7 +101,7 @@ impl CdnFetcher {
                 "Attempting chunk {} from {} (attempt {}/{})",
                 chunk_id,
                 server_host,
-                attempt_count + 1,
+                attempt_count,
                 max_attempts
             );
 
@@ -131,7 +129,7 @@ impl CdnFetcher {
                         "Retrying chunk {} from {} (attempt {}/{}, status: {}, body: {})",
                         chunk_id,
                         server_host,
-                        attempt_count + 1,
+                        attempt_count,
                         max_attempts,
                         status,
                         body_preview,
@@ -159,7 +157,7 @@ impl CdnFetcher {
                         "Retrying chunk {} from {} (attempt {}/{}, error kind: {}, error: {})",
                         chunk_id,
                         server_host,
-                        attempt_count + 1,
+                        attempt_count,
                         max_attempts,
                         error_kind,
                         e
@@ -167,28 +165,25 @@ impl CdnFetcher {
                 }
             }
 
-            if attempt_count < max_attempts {
-                attempt_count += 1;
-                if should_sleep {
-                    let delay_ms = self.config.retry_policy.retry_delay.as_millis();
-                    tracing::debug!(
-                        "Waiting {}ms before retry {} for chunk {}",
-                        delay_ms,
-                        attempt_count + 1,
-                        chunk_id
-                    );
-                    tokio::time::sleep(self.config.retry_policy.retry_delay).await;
-                }
-            } else {
-                let healthy = servers.healthy_count();
-                tracing::warn!(
-                    "Chunk {} failed after {} attempts ({} healthy servers remaining)",
-                    chunk_id,
-                    max_attempts,
-                    healthy
+            if attempt_count < max_attempts && should_sleep {
+                let delay_ms = self.config.retry_policy.retry_delay.as_millis();
+                tracing::debug!(
+                    "Waiting {}ms before retry {} for chunk {}",
+                    delay_ms,
+                    attempt_count + 1,
+                    chunk_id
                 );
-                return Err(DownloadError::AllServersFailed)?;
+                tokio::time::sleep(self.config.retry_policy.retry_delay).await;
             }
         }
+
+        let healthy = servers.healthy_count();
+        tracing::warn!(
+            "Chunk {} failed after {} attempts ({} healthy servers remaining)",
+            chunk_id,
+            max_attempts,
+            healthy
+        );
+        return Err(DownloadError::AllServersFailed)?;
     }
 }
