@@ -26,7 +26,7 @@ pub struct VersionInfo {
 pub struct ItemDetails {
     pub publishedfileid: u64,
     pub title: String,
-    pub description: String,
+    pub description: Option<String>,
     pub consumer_appid: Option<u32>,
     pub manifest_id: Option<u64>,
     pub preview_url: Option<String>,
@@ -43,7 +43,7 @@ impl From<PublishedFileDetails> for ItemDetails {
         Self {
             publishedfileid: details.publishedfileid(),
             title: details.title.unwrap_or_default(),
-            description: details.file_description.unwrap_or_default(),
+            description: details.file_description,
             consumer_appid: details.consumer_appid,
             manifest_id: details.hcontent_file,
             preview_url: details.preview_url.clone(),

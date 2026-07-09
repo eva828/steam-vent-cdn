@@ -30,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
 
     println!("Published File ID: {}", details.publishedfileid);
     println!("Title: {}", details.title);
-    println!("Description: {}", details.description);
+    println!("Description: {}", details.description.as_deref().unwrap_or("No description"));
     println!("Consumer App ID: {:?}", details.consumer_appid);
     println!("Manifest ID: {:?}", details.manifest_id);
     println!("Preview URL: {:?}", details.preview_url);
