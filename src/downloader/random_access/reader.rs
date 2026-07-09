@@ -22,7 +22,6 @@ pub struct CdnRandomAccessReader {
     pub(crate) position: u64,
     pub(crate) cache: HashMap<usize, Vec<u8>>,
     pub(crate) pending_fetch: Option<ChunkFetchFuture>,
-    pub(crate) seek_pending: bool,
     pub(crate) progress: Arc<dyn ProgressCallback>,
 }
 
@@ -54,7 +53,6 @@ impl CdnRandomAccessReader {
             position: 0,
             cache: HashMap::new(),
             pending_fetch: None,
-            seek_pending: false,
             progress,
         })
     }
@@ -174,16 +172,14 @@ impl AsyncSeek for CdnRandomAccessReader {
         }
 
         self.position = new_pos as u64;
-        self.seek_pending = true;
         self.pending_fetch = None;
         Ok(())
     }
 
     fn poll_complete(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         _cx: &mut Context<'_>,
     ) -> Poll<std::io::Result<u64>> {
-        self.seek_pending = false;
         Poll::Ready(Ok(self.position))
     }
 }
