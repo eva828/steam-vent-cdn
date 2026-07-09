@@ -9,7 +9,7 @@ use steam_vent_cdn::error::Result;
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let multi = cli::setup_tracing(args.verbose, &args.output)?;
+    let (multi, _guard) = cli::setup_tracing(args.verbose, &args.output)?;
 
     tracing::debug!("Item ID: {}", args.item_id);
 

@@ -9,11 +9,12 @@ use indicatif::MultiProgress;
 pub use pipeline::{run_download_pipeline, run_list_versions_pipeline};
 use steam_vent_cdn::config::{Config, Credentials, RetryPolicy, ServerMode};
 use steam_vent_cdn::error::Result;
+use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::Layer;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::util::SubscriberInitExt;
 
-pub fn setup_tracing(verbose: bool, output_dir: &std::path::Path) -> Result<MultiProgress> {
+pub fn setup_tracing(verbose: bool, output_dir: &std::path::Path) -> Result<(MultiProgress, WorkerGuard)> {
     std::fs::create_dir_all(output_dir)?;
     let log_path = output_dir.join("steam-vent-cdn.log");
     let log_file = std::fs::File::create(&log_path)?;
@@ -66,8 +67,10 @@ pub fn setup_tracing(verbose: bool, output_dir: &std::path::Path) -> Result<Mult
         .with(file_layer)
         .init();
 
-    std::mem::forget(guard);
-    Ok(multi)
+    // The WorkerGuard must outlive the logging layers: if it is dropped, the
+    // background writer thread stops. Returning it lets the caller hold it
+    // until program exit, where its Drop flushes buffered log lines to disk.
+    Ok((multi, guard))
 }
 
 pub fn resolve_credentials(
