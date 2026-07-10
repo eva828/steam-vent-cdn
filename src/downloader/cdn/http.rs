@@ -32,7 +32,7 @@ impl CdnFetcher {
         manifest_id: u64,
         manifest_request_code: u64,
     ) -> Result<Vec<u8>> {
-        for server_host in servers.iter() {
+        for server_host in servers.iter().filter(|h| servers.is_healthy(h)) {
             let manifest_url = format!(
                 "https://{}/depot/{}/manifest/{}/5/{}",
                 server_host, depot_id, manifest_id, manifest_request_code
