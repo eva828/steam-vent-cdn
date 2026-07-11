@@ -184,6 +184,6 @@ impl CdnFetcher {
             max_attempts,
             healthy
         );
-        return Err(DownloadError::AllServersFailed)?;
+        Err(DownloadError::AllServersFailed)?
     }
 }

@@ -233,10 +233,6 @@ impl<'a> RoundRobin<'a> {
         Self { list }
     }
 
-    pub(crate) fn len(&self) -> usize {
-        self.list.len()
-    }
-
     pub(crate) fn next(&self) -> Result<&str> {
         let total = self.list.len();
         if total == 0 {
