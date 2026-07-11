@@ -215,3 +215,184 @@ pub(crate) async fn run_reassembly_loop(
             .await;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::downloader::ProgressCallback;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    struct CountingProgress {
+        write_bytes: AtomicU64,
+    }
+
+    impl ProgressCallback for CountingProgress {
+        fn on_download_progress(&self, _bytes: u64) {}
+        fn on_decode_progress(&self, _bytes: u64) {}
+        fn on_write_progress(&self, bytes: u64) {
+            self.write_bytes.fetch_add(bytes, Ordering::Relaxed);
+        }
+    }
+
+    use crate::error::SteamVentError;
+
+    fn chunk(offset: u64, data: Vec<u8>) -> DecodedChunk {
+        DecodedChunk {
+            chunk_offset: offset,
+            data,
+        }
+    }
+
+    #[tokio::test]
+    async fn reassembles_chunks_in_order() {
+        let (decoded_tx, decoded_rx) = tokio::sync::mpsc::channel(8);
+        let (output_tx, mut output_rx) = tokio::sync::mpsc::channel(8);
+        let (cancel_tx, _) = tokio::sync::watch::channel(false);
+        let progress = Arc::new(CountingProgress {
+            write_bytes: AtomicU64::new(0),
+        });
+
+        let handle = tokio::spawn(run_reassembly_loop(
+            decoded_rx,
+            output_tx,
+            Arc::clone(&progress) as Arc<dyn ProgressCallback>,
+            "test.dat".into(),
+            2,
+            cancel_tx,
+        ));
+
+        let _ = decoded_tx.send(Ok(chunk(0, b"hello".to_vec()))).await;
+        let _ = decoded_tx.send(Ok(chunk(5, b" world".to_vec()))).await;
+        drop(decoded_tx);
+
+        let mut parts = Vec::new();
+        while let Some(Ok(data)) = output_rx.recv().await {
+            parts.push(data);
+        }
+        handle.await.unwrap();
+
+        assert_eq!(parts, vec![b"hello".to_vec(), b" world".to_vec()]);
+    }
+
+    #[tokio::test]
+    async fn reassembles_chunks_out_of_order() {
+        let (decoded_tx, decoded_rx) = tokio::sync::mpsc::channel(8);
+        let (output_tx, mut output_rx) = tokio::sync::mpsc::channel(8);
+        let (cancel_tx, _) = tokio::sync::watch::channel(false);
+        let progress = Arc::new(CountingProgress {
+            write_bytes: AtomicU64::new(0),
+        });
+
+        let handle = tokio::spawn(run_reassembly_loop(
+            decoded_rx,
+            output_tx,
+            Arc::clone(&progress) as Arc<dyn ProgressCallback>,
+            "reordered.dat".into(),
+            3,
+            cancel_tx,
+        ));
+
+        // Send chunks out of order: data at offsets 10, 6, 0
+        // Each chunk: "first " (6 bytes), "mid " (4 bytes), "last" (4 bytes)
+        // Contiguous range: [0, 14)
+        let _ = decoded_tx
+            .send(Ok(chunk(10, b"last".to_vec())))
+            .await;
+        let _ = decoded_tx
+            .send(Ok(chunk(6, b"mid ".to_vec())))
+            .await;
+        let _ = decoded_tx
+            .send(Ok(chunk(0, b"first ".to_vec())))
+            .await;
+        drop(decoded_tx);
+
+        let mut parts = Vec::new();
+        while let Some(Ok(data)) = output_rx.recv().await {
+            parts.push(data);
+        }
+        handle.await.unwrap();
+
+        let concat: Vec<u8> = parts.iter().flat_map(|p| p.iter().copied()).collect();
+        assert_eq!(String::from_utf8(concat).unwrap(), "first mid last");
+    }
+
+    #[tokio::test]
+    async fn error_propagates_and_cancels() {
+        let (decoded_tx, decoded_rx) = tokio::sync::mpsc::channel(8);
+        let (output_tx, mut output_rx) = tokio::sync::mpsc::channel(8);
+        let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(false);
+        let progress = Arc::new(CountingProgress {
+            write_bytes: AtomicU64::new(0),
+        });
+
+        let handle = tokio::spawn(run_reassembly_loop(
+            decoded_rx,
+            output_tx,
+            Arc::clone(&progress) as Arc<dyn ProgressCallback>,
+            "err.dat".into(),
+            3,
+            cancel_tx,
+        ));
+
+        let _ = decoded_tx
+            .send(Err(SteamVentError::Chunk(
+                crate::error::ChunkError::ChecksumMismatch {
+                    expected: 100,
+                    actual: 200,
+                },
+            )))
+            .await;
+        drop(decoded_tx);
+
+        // Cancel signal should be sent
+        assert!(cancel_rx.changed().await.is_ok());
+
+        let err = output_rx.recv().await.unwrap().unwrap_err();
+        assert!(matches!(
+            err,
+            SteamVentError::Chunk(crate::error::ChunkError::ChecksumMismatch { .. })
+        ));
+
+        handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn incomplete_download_reports_error() {
+        let (decoded_tx, decoded_rx) = tokio::sync::mpsc::channel(8);
+        let (output_tx, mut output_rx) = tokio::sync::mpsc::channel(8);
+        let (cancel_tx, _) = tokio::sync::watch::channel(false);
+        let progress = Arc::new(CountingProgress {
+            write_bytes: AtomicU64::new(0),
+        });
+
+        let handle = tokio::spawn(run_reassembly_loop(
+            decoded_rx,
+            output_tx,
+            Arc::clone(&progress) as Arc<dyn ProgressCallback>,
+            "incomplete.dat".into(),
+            5,
+            cancel_tx,
+        ));
+
+        // Only send 2 of 5 expected chunks
+        let _ = decoded_tx.send(Ok(chunk(0, b"aa".to_vec()))).await;
+        let _ = decoded_tx.send(Ok(chunk(2, b"bb".to_vec()))).await;
+        drop(decoded_tx); // channel closes early
+
+        let mut received_ok = 0;
+        while let Some(result) = output_rx.recv().await {
+            match result {
+                Ok(_) => received_ok += 1,
+                Err(e) => {
+                    assert!(matches!(
+                        e,
+                        SteamVentError::Download(DownloadError::IncompleteDownload { .. })
+                    ));
+                }
+            }
+        }
+        handle.await.unwrap();
+
+        assert_eq!(received_ok, 2);
+    }
+}

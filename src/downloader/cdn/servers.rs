@@ -283,3 +283,224 @@ impl<'a> RoundRobin<'a> {
         self.list.healthy_count()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::SteamVentError;
+
+    fn server(vhost: &str, server_type: &str, weighted_load: f32) -> ContentServer {
+        ContentServer {
+            vhost: vhost.to_string(),
+            server_type: server_type.to_string(),
+            weighted_load,
+            load: 0,
+            priority_class: 0,
+        }
+    }
+
+    #[test]
+    fn sort_by_load_orders_ascending() {
+        let mut servers = vec![
+            server("c", "SteamCache", 3.0),
+            server("a", "SteamCache", 1.0),
+            server("b", "SteamCache", 2.0),
+        ];
+        sort_by_load(&mut servers);
+        let names: Vec<&str> = servers.iter().map(|s| s.vhost.as_str()).collect();
+        assert_eq!(names, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn sort_by_load_handles_nan_without_panic() {
+        let mut servers = vec![
+            server("a", "SteamCache", f32::NAN),
+            server("b", "SteamCache", 1.0),
+        ];
+        sort_by_load(&mut servers);
+        // Must not panic; exact order for NaN is unspecified but stable
+    }
+
+    #[test]
+    fn blacklist_timeout_exponential_backoff() {
+        assert_eq!(blacklist_timeout(1), Duration::from_secs(10));
+        assert_eq!(blacklist_timeout(2), Duration::from_secs(20));
+        assert_eq!(blacklist_timeout(3), Duration::from_secs(40));
+        assert_eq!(blacklist_timeout(4), Duration::from_secs(80));
+    }
+
+    #[test]
+    fn from_servers_partitions_cdn_and_cache() {
+        let servers = vec![
+            server("cdn1", "CDN", 5.0),
+            server("cache1", "SteamCache", 1.0),
+            server("cache2", "SteamCache", 3.0),
+            server("cdn2", "CDN", 2.0),
+        ];
+        let list = ContentServerList::from_servers(servers, ServerMode::CachePreferred);
+
+        assert_eq!(list.len(), 4);
+        // Verify cache servers are sorted by load
+        let cache_hosts: Vec<&str> = list.cache_servers.iter().map(|s| s.vhost.as_str()).collect();
+        assert_eq!(cache_hosts, vec!["cache1", "cache2"]);
+    }
+
+    #[test]
+    fn report_failure_blacklists_after_three() {
+        let list = ContentServerList::from_servers(
+            vec![server("s1", "SteamCache", 1.0)],
+            ServerMode::CachePreferred,
+        );
+
+        assert!(list.is_healthy("s1"));
+        list.report_failure("s1");
+        assert!(list.is_healthy("s1"));
+        list.report_failure("s1");
+        assert!(list.is_healthy("s1"));
+        list.report_failure("s1");
+        assert!(!list.is_healthy("s1"));
+    }
+
+    #[test]
+    fn report_success_resets_blacklist() {
+        let list = ContentServerList::from_servers(
+            vec![server("s1", "SteamCache", 1.0)],
+            ServerMode::CachePreferred,
+        );
+
+        list.report_failure("s1");
+        list.report_failure("s1");
+        list.report_failure("s1");
+        assert!(!list.is_healthy("s1"));
+
+        list.report_success("s1");
+        assert!(list.is_healthy("s1"));
+    }
+
+    #[test]
+    fn round_robin_skips_blacklisted_servers() {
+        let list = ContentServerList::from_servers(
+            vec![
+                server("bad", "SteamCache", 1.0),
+                server("good1", "SteamCache", 2.0),
+                server("good2", "SteamCache", 3.0),
+            ],
+            ServerMode::CachePreferred,
+        );
+
+        // Blacklist "bad"
+        list.report_failure("bad");
+        list.report_failure("bad");
+        list.report_failure("bad");
+
+        let rr = RoundRobin::new(&list);
+        let picks: Vec<&str> = (0..4).filter_map(|_| rr.next().ok()).collect();
+        // Should only pick good1 and good2, alternating
+        for pick in &picks {
+            assert_ne!(*pick, "bad");
+        }
+        assert!(picks.len() == 4);
+    }
+
+    #[test]
+    fn round_robin_all_blacklisted_returns_error() {
+        let list = ContentServerList::from_servers(
+            vec![server("s1", "SteamCache", 1.0)],
+            ServerMode::CachePreferred,
+        );
+        list.report_failure("s1");
+        list.report_failure("s1");
+        list.report_failure("s1");
+
+        let rr = RoundRobin::new(&list);
+        assert!(matches!(
+            rr.next(),
+            Err(SteamVentError::Download(DownloadError::AllServersFailed))
+        ));
+    }
+
+    #[test]
+    fn round_robin_empty_returns_no_servers() {
+        let list = ContentServerList::from_servers(vec![], ServerMode::CachePreferred);
+        let rr = RoundRobin::new(&list);
+        assert!(matches!(
+            rr.next(),
+            Err(SteamVentError::Download(DownloadError::NoServers))
+        ));
+    }
+
+    #[test]
+    fn round_robin_cache_preferred_falls_back_to_cdn() {
+        let list = ContentServerList::from_servers(
+            vec![
+                server("cache", "SteamCache", 1.0),
+                server("cdn", "CDN", 2.0),
+            ],
+            ServerMode::CachePreferred,
+        );
+
+        // Blacklist cache
+        list.report_failure("cache");
+        list.report_failure("cache");
+        list.report_failure("cache");
+
+        let rr = RoundRobin::new(&list);
+        let picks: Vec<&str> = (0..3).filter_map(|_| rr.next().ok()).collect();
+        // Should only pick CDN server
+        for pick in &picks {
+            assert_eq!(*pick, "cdn");
+        }
+    }
+
+    #[test]
+    fn server_mode_cdn_ignores_cache_servers() {
+        let list = ContentServerList::from_servers(
+            vec![
+                server("cache", "SteamCache", 1.0),
+                server("cdn", "CDN", 2.0),
+            ],
+            ServerMode::Cdn,
+        );
+
+        assert_eq!(list.len(), 1);
+        let rr = RoundRobin::new(&list);
+        let picks: Vec<&str> = (0..3).filter_map(|_| rr.next().ok()).collect();
+        for pick in &picks {
+            assert_eq!(*pick, "cdn");
+        }
+    }
+
+    #[test]
+    fn server_mode_cache_ignores_cdn_servers() {
+        let list = ContentServerList::from_servers(
+            vec![
+                server("cache", "SteamCache", 1.0),
+                server("cdn", "CDN", 2.0),
+            ],
+            ServerMode::Cache,
+        );
+
+        assert_eq!(list.len(), 1);
+        let rr = RoundRobin::new(&list);
+        let picks: Vec<&str> = (0..3).filter_map(|_| rr.next().ok()).collect();
+        for pick in &picks {
+            assert_eq!(*pick, "cache");
+        }
+    }
+
+    #[test]
+    fn round_robin_rotates() {
+        let list = ContentServerList::from_servers(
+            vec![
+                server("a", "SteamCache", 1.0),
+                server("b", "SteamCache", 2.0),
+            ],
+            ServerMode::CachePreferred,
+        );
+
+        let rr = RoundRobin::new(&list);
+        assert_eq!(rr.next().unwrap(), "a");
+        assert_eq!(rr.next().unwrap(), "b");
+        assert_eq!(rr.next().unwrap(), "a");
+    }
+}

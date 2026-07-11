@@ -144,3 +144,157 @@ impl RawManifest {
         Ok(entries)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::ServerMode;
+    use crate::downloader::cdn::servers::{ContentServerList, DepotContext};
+    use crate::error::SteamVentError;
+    use std::sync::Arc;
+    use steam_vent_proto::content_manifest::{ContentManifestMetadata, ContentManifestPayload};
+    use steam_vent_proto::content_manifest::content_manifest_payload::file_mapping::ChunkData as ProtoChunk;
+    use steam_vent_proto::content_manifest::content_manifest_payload::FileMapping;
+
+    fn make_payload_with_files(files: &[(&str, u64)]) -> Vec<u8> {
+        let mut payload = ContentManifestPayload::new();
+        for &(name, size) in files {
+            let mut chunk = ProtoChunk::new();
+            chunk.sha = Some(vec![0xABu8; 20]);
+            chunk.crc = Some(42);
+            chunk.offset = Some(0);
+            chunk.cb_original = Some(size as u32);
+            chunk.cb_compressed = Some(size as u32);
+
+            let mut mapping = FileMapping::new();
+            mapping.filename = Some(name.to_string());
+            mapping.chunks = vec![chunk].into();
+            mapping.flags = Some(0);
+            mapping.size = Some(size);
+
+            payload.mappings.push(mapping);
+        }
+        payload.write_to_bytes().unwrap()
+    }
+
+    fn make_segment(magic: u32, data: &[u8]) -> Vec<u8> {
+        let mut seg = Vec::new();
+        seg.extend_from_slice(&magic.to_le_bytes());
+        seg.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        seg.extend_from_slice(data);
+        seg
+    }
+
+    fn make_manifest_zip(segments: &[&[u8]]) -> Vec<u8> {
+        use std::io::Write;
+        let buf = std::io::Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(buf);
+        let opts: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        zip.start_file("m", opts).unwrap();
+        for seg in segments {
+            zip.write_all(seg).unwrap();
+        }
+        let finished = zip.finish().unwrap();
+        finished.into_inner()
+    }
+
+    fn make_empty_depot() -> Arc<DepotContext> {
+        Arc::new(DepotContext {
+            servers: ContentServerList::from_servers(vec![], ServerMode::Cdn),
+            depot_id: 9999,
+            depot_key: None,
+        })
+    }
+
+    #[test]
+    fn decode_valid_manifest_with_payload_and_metadata() {
+        let payload_data = make_payload_with_files(&[("data/game.cfg", 2048)]);
+        let payload_seg = make_segment(MAGIC_PAYLOAD, &payload_data);
+
+        let mut metadata = ContentManifestMetadata::new();
+        metadata.filenames_encrypted = Some(false);
+        metadata.depot_id = Some(4321);
+        let metadata_data = metadata.write_to_bytes().unwrap();
+        let metadata_seg = make_segment(MAGIC_METADATA_1, &metadata_data);
+
+        let zip = make_manifest_zip(&[&payload_seg, &metadata_seg]);
+
+        let raw = RawManifest::decode(&zip).unwrap();
+        assert_eq!(raw.filenames_encrypted().unwrap(), false);
+        assert_eq!(raw.depot_id_for_key(1111).unwrap(), 1111);
+
+        let entries = raw.into_entries(make_empty_depot()).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].filename, "data/game.cfg");
+        assert_eq!(entries[0].size, Some(2048));
+    }
+
+    #[test]
+    fn decode_fails_on_missing_payload() {
+        let mut metadata = ContentManifestMetadata::new();
+        metadata.filenames_encrypted = Some(true);
+        metadata.depot_id = Some(1234);
+        let metadata_data = metadata.write_to_bytes().unwrap();
+        let metadata_seg = make_segment(MAGIC_METADATA_1, &metadata_data);
+        let zip = make_manifest_zip(&[&metadata_seg]);
+
+        assert!(matches!(
+            RawManifest::decode(&zip),
+            Err(SteamVentError::Manifest(ManifestError::MissingPayload))
+        ));
+    }
+
+    #[test]
+    fn decode_fails_on_unknown_magic() {
+        let bad_seg = make_segment(0xDEADBEEF, b"junk");
+        let zip = make_manifest_zip(&[&bad_seg]);
+
+        assert!(matches!(
+            RawManifest::decode(&zip),
+            Err(SteamVentError::Manifest(ManifestError::UnknownSegmentMagic(0xDEADBEEF)))
+        ));
+    }
+
+    #[test]
+    fn decode_fails_on_segment_length_exceeded() {
+        let payload_data = make_payload_with_files(&[("x", 100)]);
+        // Lie about segment length: claim more data than available
+        let mut seg = Vec::new();
+        seg.extend_from_slice(&MAGIC_PAYLOAD.to_le_bytes());
+        seg.extend_from_slice(&(payload_data.len() as u32 + 9999).to_le_bytes());
+        seg.extend_from_slice(&payload_data);
+        let zip = make_manifest_zip(&[&seg]);
+
+        assert!(matches!(
+            RawManifest::decode(&zip),
+            Err(SteamVentError::Manifest(ManifestError::SegmentLengthExceeded { .. }))
+        ));
+    }
+
+    #[test]
+    fn into_entries_fails_on_missing_filename() {
+        let payload_data = make_payload_with_files(&[("ok", 10)]);
+        let payload_seg = make_segment(MAGIC_PAYLOAD, &payload_data);
+        let zip = make_manifest_zip(&[&payload_seg]);
+
+        let mut raw = RawManifest::decode(&zip).unwrap();
+        // Nuke the filename to trigger error
+        raw.payload.mappings[0].filename = None;
+
+        assert!(raw.into_entries(make_empty_depot()).is_err());
+    }
+
+    #[test]
+    fn into_entries_fails_on_missing_chunk_sha() {
+        let payload_data = make_payload_with_files(&[("broken", 50)]);
+        let payload_seg = make_segment(MAGIC_PAYLOAD, &payload_data);
+        let zip = make_manifest_zip(&[&payload_seg]);
+
+        let mut raw = RawManifest::decode(&zip).unwrap();
+        // Remove sha from chunk
+        raw.payload.mappings[0].chunks[0].sha = None;
+
+        assert!(raw.into_entries(make_empty_depot()).is_err());
+    }
+}

@@ -343,3 +343,230 @@ impl SteamChunk {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::{ChunkError, SteamVentError};
+    use aes::cipher::{BlockEncrypt, BlockEncryptMut, KeyInit};
+    use cbc::cipher::block_padding::Pkcs7;
+    use std::io::Write;
+
+    type Aes256CbcEnc = cbc::Encryptor<Aes256>;
+
+    fn make_test_key() -> [u8; 32] {
+        [0x42u8; 32]
+    }
+
+    fn make_encrypted_test_data(plaintext: &[u8], key: &[u8]) -> Vec<u8> {
+        let iv: [u8; 16] = [0xABu8; 16];
+
+        let ecb_cipher = Aes256::new_from_slice(key).unwrap();
+        let mut encrypted_iv = iv;
+        let block = aes::cipher::generic_array::GenericArray::from_mut_slice(&mut encrypted_iv);
+        ecb_cipher.encrypt_block(block);
+
+        let cbc_cipher = Aes256CbcEnc::new_from_slices(key, &iv).unwrap();
+        let mut buf = plaintext.to_vec();
+        let len = buf.len();
+        buf.resize(len + 16, 0);
+        let encrypted = cbc_cipher
+            .encrypt_padded_mut::<Pkcs7>(&mut buf, len)
+            .unwrap();
+
+        let mut result = encrypted_iv.to_vec();
+        result.extend_from_slice(encrypted);
+        result
+    }
+
+    fn make_zip(data: &[u8]) -> Vec<u8> {
+        let buf = std::io::Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(buf);
+        let opts: zip::write::FileOptions<'_, ()> =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        zip.start_file("f", opts).unwrap();
+        zip.write_all(data).unwrap();
+        let finished = zip.finish().unwrap();
+        finished.into_inner()
+    }
+
+    fn adler32(data: &[u8]) -> u32 {
+        let mut h = adler::Adler32::from_checksum(0);
+        h.write_slice(data);
+        h.checksum()
+    }
+
+    #[test]
+    fn decrypt_with_key_roundtrips() {
+        let original = b"hello world, this is test data for steam chunk decryption!";
+        let key = make_test_key();
+        let encrypted = make_encrypted_test_data(original, &key);
+
+        let chunk = SteamChunk::new(encrypted);
+        let result = chunk.decrypt(Some(&key)).unwrap();
+        assert!(matches!(result, SteamChunk::Decrypted(ref d) if d == original));
+    }
+
+    #[test]
+    fn decrypt_without_key_passes_through() {
+        let data = b"raw unencrypted chunk".to_vec();
+        let chunk = SteamChunk::new(data.clone());
+        let result = chunk.decrypt(None).unwrap();
+        assert!(matches!(result, SteamChunk::Decrypted(ref d) if d == &data));
+    }
+
+    #[test]
+    fn decrypt_short_data_passes_through() {
+        let data = b"shrt".to_vec();
+        let key = make_test_key();
+        let chunk = SteamChunk::new(data.clone());
+        let result = chunk.decrypt(Some(&key)).unwrap();
+        assert!(matches!(result, SteamChunk::Decrypted(ref d) if d == &data));
+    }
+
+    #[test]
+    fn decrypt_wrong_key_fails() {
+        let original = b"data encrypted with one key, decrypted with another";
+        let key = make_test_key();
+        let wrong_key = [0xFFu8; 32];
+        let encrypted = make_encrypted_test_data(original, &key);
+
+        let chunk = SteamChunk::new(encrypted);
+        assert!(chunk.decrypt(Some(&wrong_key)).is_err());
+    }
+
+    #[test]
+    fn decrypt_on_decrypted_state_errors() {
+        let chunk = SteamChunk::new(b"data".to_vec());
+        let chunk = chunk.decrypt(None).unwrap();
+        assert!(matches!(
+            chunk.decrypt(None),
+            Err(SteamVentError::Chunk(ChunkError::UnexpectedState { .. }))
+        ));
+    }
+
+    #[test]
+    fn decompress_and_verify_zip_roundtrips() {
+        let original = b"zip compressed steam chunk test payload";
+        let compressed = make_zip(original);
+        let crc = adler32(original);
+
+        let chunk = SteamChunk::new(compressed);
+        let chunk = chunk.decrypt(None).unwrap();
+        let result = chunk
+            .decompress_and_verify(original.len() as u32, crc)
+            .unwrap();
+        assert!(matches!(result, SteamChunk::Decompressed(ref d) if d == original));
+    }
+
+    #[test]
+    fn decompress_and_verify_checksum_mismatch_errors() {
+        let original = b"checksum will be wrong";
+        let compressed = make_zip(original);
+
+        let chunk = SteamChunk::new(compressed);
+        let chunk = chunk.decrypt(None).unwrap();
+        assert!(matches!(
+            chunk.decompress_and_verify(original.len() as u32, 0xDEADBEEF),
+            Err(SteamVentError::Chunk(ChunkError::ChecksumMismatch { .. }))
+        ));
+    }
+
+    #[test]
+    fn decompress_and_verify_size_mismatch_errors() {
+        let original = b"size will be reported wrong";
+        let compressed = make_zip(original);
+        let crc = adler32(original);
+
+        let chunk = SteamChunk::new(compressed);
+        let chunk = chunk.decrypt(None).unwrap();
+        assert!(matches!(
+            chunk.decompress_and_verify((original.len() + 100) as u32, crc),
+            Err(SteamVentError::Chunk(ChunkError::SizeMismatch { .. }))
+        ));
+    }
+
+    #[test]
+    fn decompress_and_verify_on_encrypted_errors() {
+        let chunk = SteamChunk::new(b"encrypted not decrypted".to_vec());
+        assert!(matches!(
+            chunk.decompress_and_verify(0, 0),
+            Err(SteamVentError::Chunk(ChunkError::UnexpectedState { .. }))
+        ));
+    }
+
+    #[test]
+    fn full_encrypt_decrypt_decompress_pipeline() {
+        let original = b"full pipeline: encrypt, decrypt, decompress, verify";
+        let key = make_test_key();
+        let compressed = make_zip(original);
+        let encrypted = make_encrypted_test_data(&compressed, &key);
+        let crc = adler32(original);
+
+        let chunk = SteamChunk::new(encrypted);
+        let chunk = chunk.decrypt(Some(&key)).unwrap();
+        let result = chunk
+            .decompress_and_verify(original.len() as u32, crc)
+            .unwrap();
+        assert!(matches!(result, SteamChunk::Decompressed(ref d) if d == original));
+    }
+
+    #[test]
+    fn archive_detector_prefers_zip_over_raw() {
+        let data = make_zip(b"zip or raw");
+        let extractor = create_archive_extractor(&data).unwrap();
+        assert_eq!(extractor.extract().unwrap(), b"zip or raw");
+    }
+
+    #[test]
+    fn archive_detector_handles_vsza() {
+        let original = b"zstd vsza container test";
+        let zstd_data = zstd::stream::encode_all(original.as_ref(), 3).unwrap();
+        let mut vsza = b"VSZa\0\0\0\0".to_vec();
+        vsza.extend_from_slice(&zstd_data);
+
+        let extractor = create_archive_extractor(&vsza).unwrap();
+        assert_eq!(extractor.extract().unwrap(), original);
+    }
+
+    #[test]
+    fn archive_detector_handles_vza() {
+        let original = b"vza format test payload for archive extractor detection";
+        let mut lzma_data = Vec::new();
+        lzma_rs::lzma_compress_with_options(
+            &mut std::io::BufReader::new(std::io::Cursor::new(original)),
+            &mut lzma_data,
+            &lzma_rs::compress::Options {
+                unpacked_size: lzma_rs::compress::UnpackedSize::SkipWritingToHeader,
+            },
+        )
+        .unwrap();
+
+        let mut vza = vec![b'V', b'Z', b'a', 0, 0, 0, 0];
+        vza.extend_from_slice(&lzma_data);
+        vza.extend_from_slice(&[0u8; 4]);
+        vza.extend_from_slice(&(original.len() as u32).to_le_bytes());
+        vza.extend_from_slice(b"zv");
+
+        let extractor = create_archive_extractor(&vza).unwrap();
+        let result = extractor.extract().unwrap();
+        assert_eq!(result, original);
+    }
+
+    #[test]
+    fn archive_detector_handles_lzma() {
+        let original = b"plain lzma data";
+        let mut compressed = Vec::new();
+        lzma_rs::lzma_compress(&mut std::io::Cursor::new(original), &mut compressed).unwrap();
+
+        let extractor = create_archive_extractor(&compressed).unwrap();
+        assert_eq!(extractor.extract().unwrap(), original);
+    }
+
+    #[test]
+    fn archive_detector_falls_back_to_raw() {
+        let data = b"not a recognized archive format at all";
+        let extractor = create_archive_extractor(data).unwrap();
+        assert_eq!(extractor.extract().unwrap(), data);
+    }
+}

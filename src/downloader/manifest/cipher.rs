@@ -91,3 +91,89 @@ impl ManifestCipher {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aes::cipher::{BlockEncrypt, BlockEncryptMut, KeyInit};
+    use cbc::cipher::block_padding::Pkcs7;
+
+    type Aes256CbcEnc = cbc::Encryptor<Aes256>;
+
+    fn make_test_key() -> [u8; 32] {
+        [0xABu8; 32]
+    }
+
+    fn encrypt_filename(plain: &str, key: &[u8]) -> String {
+        let iv: [u8; 16] = [0xCDu8; 16];
+
+        let ecb = Aes256::new_from_slice(key).unwrap();
+        let mut encrypted_iv = iv;
+        let block = aes::cipher::generic_array::GenericArray::from_mut_slice(&mut encrypted_iv);
+        ecb.encrypt_block(block);
+
+        let cbc = Aes256CbcEnc::new_from_slices(key, &iv).unwrap();
+        let data = plain.as_bytes();
+        let mut buf = data.to_vec();
+        let len = buf.len();
+        buf.resize(len + 16, 0);
+        let encrypted = cbc.encrypt_padded_mut::<Pkcs7>(&mut buf, len).unwrap();
+
+        let mut result = encrypted_iv.to_vec();
+        result.extend_from_slice(encrypted);
+        base64::engine::general_purpose::STANDARD.encode(&result)
+    }
+
+    #[test]
+    fn decrypt_valid_string() {
+        let key = make_test_key();
+        let cipher = ManifestCipher::new(&key).unwrap();
+        let enc = encrypt_filename("my_workshop_file.txt", &key);
+        let dec = cipher.decrypt_string(&enc).unwrap();
+        assert_eq!(dec, "my_workshop_file.txt");
+    }
+
+    #[test]
+    fn decrypt_fails_on_empty_input() {
+        let cipher = ManifestCipher::new(&make_test_key()).unwrap();
+        assert!(cipher.decrypt_string("").is_err());
+    }
+
+    #[test]
+    fn decrypt_fails_on_invalid_base64() {
+        let cipher = ManifestCipher::new(&make_test_key()).unwrap();
+        assert!(cipher.decrypt_string("!!!invalid!!!").is_err());
+    }
+
+    #[test]
+    fn decrypt_fails_on_too_short() {
+        let cipher = ManifestCipher::new(&make_test_key()).unwrap();
+        let short = base64::engine::general_purpose::STANDARD.encode(&[0x42u8; 4]);
+        assert!(cipher.decrypt_string(&short).is_err());
+    }
+
+    #[test]
+    fn decrypt_fails_on_wrong_key() {
+        let key = make_test_key();
+        let wrong_key = [0xFFu8; 32];
+        let enc = encrypt_filename("test_file.bin", &key);
+        let cipher = ManifestCipher::new(&wrong_key).unwrap();
+        assert!(cipher.decrypt_string(&enc).is_err());
+    }
+
+    #[test]
+    fn decrypt_filename_with_url_safe_base64() {
+        let key = make_test_key();
+        let cipher = ManifestCipher::new(&key).unwrap();
+        let enc = encrypt_filename("mod/ textures.vtf", &key);
+
+        // Encode as actual URL-safe base64 (no padding)
+        let raw = base64::engine::general_purpose::STANDARD
+            .decode(&enc)
+            .unwrap();
+        let url_safe = base64::engine::general_purpose::URL_SAFE.encode(&raw);
+
+        let dec = cipher.decrypt_string(&url_safe).unwrap();
+        assert_eq!(dec, "mod/ textures.vtf");
+    }
+}
