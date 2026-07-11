@@ -176,10 +176,7 @@ impl AsyncSeek for CdnRandomAccessReader {
         Ok(())
     }
 
-    fn poll_complete(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<std::io::Result<u64>> {
+    fn poll_complete(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<u64>> {
         Poll::Ready(Ok(self.position))
     }
 }

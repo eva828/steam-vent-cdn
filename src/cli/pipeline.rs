@@ -67,8 +67,7 @@ async fn resolve_version(
         }
         Err(WorkshopError::VersionNotFound(format!("Timestamp {}", ts)))?
     } else {
-        Ok(Box::pin(downloader
-            .fetch_versions(item_id, Some(1)))
+        Ok(Box::pin(downloader.fetch_versions(item_id, Some(1)))
             .try_next()
             .await?
             .ok_or(WorkshopError::NoVersionsFound)?)

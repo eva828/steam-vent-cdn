@@ -14,7 +14,10 @@ use tracing_subscriber::Layer;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::util::SubscriberInitExt;
 
-pub fn setup_tracing(verbose: bool, output_dir: &std::path::Path) -> Result<(MultiProgress, WorkerGuard)> {
+pub fn setup_tracing(
+    verbose: bool,
+    output_dir: &std::path::Path,
+) -> Result<(MultiProgress, WorkerGuard)> {
     std::fs::create_dir_all(output_dir)?;
     let log_path = output_dir.join("steam-vent-cdn.log");
     let log_file = std::fs::File::create(&log_path)?;
