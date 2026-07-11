@@ -37,7 +37,7 @@ async fn main() -> anyhow::Result<()> {
     let session = client.connect().await?;
     let downloader = CdnDownloader::connect(session).await?;
 
-    let mut stream = downloader.fetch_versions(item_id, None);
+    let mut stream = Box::pin(downloader.fetch_versions(item_id, None));
     let mut version = None;
     while let Some(v) = stream.try_next().await? {
         if v.timestamp == timestamp {

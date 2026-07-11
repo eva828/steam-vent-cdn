@@ -1,7 +1,6 @@
 use crate::connection::ConnectionExt;
 use crate::downloader::client::CdnDownloader;
 use crate::error::{DownloadError, Result, SteamSessionError, SteamVentError, WorkshopError};
-use std::pin::Pin;
 
 use async_stream::try_stream;
 use futures::Stream;
@@ -139,12 +138,8 @@ impl CdnDownloader {
         &'a self,
         item_id: u64,
         max: Option<u32>,
-    ) -> Pin<Box<dyn Stream<Item = Result<VersionInfo>> + Send + 'a>> {
-        Box::pin(try_stream! {
-            if max == Some(0) {
-                return;
-            }
-
+    ) -> impl Stream<Item = Result<VersionInfo>> + Send + 'a {
+        try_stream! {
             const PAGE_SIZE: u32 = 100;
             let mut offset = 0u32;
 
@@ -168,7 +163,7 @@ impl CdnDownloader {
 
                 offset += count;
             }
-        })
+        }
     }
 
     pub(crate) async fn fetch_manifest_request_code(

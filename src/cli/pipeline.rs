@@ -59,7 +59,7 @@ async fn resolve_version(
     timestamp: Option<u32>,
 ) -> Result<VersionInfo> {
     if let Some(ts) = timestamp {
-        let mut stream = downloader.fetch_versions(item_id, None);
+        let mut stream = Box::pin(downloader.fetch_versions(item_id, None));
         while let Some(version) = stream.try_next().await? {
             if version.timestamp == ts {
                 return Ok(version);
@@ -67,8 +67,8 @@ async fn resolve_version(
         }
         Err(WorkshopError::VersionNotFound(format!("Timestamp {}", ts)))?
     } else {
-        Ok(downloader
-            .fetch_versions(item_id, Some(1))
+        Ok(Box::pin(downloader
+            .fetch_versions(item_id, Some(1)))
             .try_next()
             .await?
             .ok_or(WorkshopError::NoVersionsFound)?)
