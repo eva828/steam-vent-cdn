@@ -295,15 +295,9 @@ mod tests {
         // Send chunks out of order: data at offsets 10, 6, 0
         // Each chunk: "first " (6 bytes), "mid " (4 bytes), "last" (4 bytes)
         // Contiguous range: [0, 14)
-        let _ = decoded_tx
-            .send(Ok(chunk(10, b"last".to_vec())))
-            .await;
-        let _ = decoded_tx
-            .send(Ok(chunk(6, b"mid ".to_vec())))
-            .await;
-        let _ = decoded_tx
-            .send(Ok(chunk(0, b"first ".to_vec())))
-            .await;
+        let _ = decoded_tx.send(Ok(chunk(10, b"last".to_vec()))).await;
+        let _ = decoded_tx.send(Ok(chunk(6, b"mid ".to_vec()))).await;
+        let _ = decoded_tx.send(Ok(chunk(0, b"first ".to_vec()))).await;
         drop(decoded_tx);
 
         let mut parts = Vec::new();

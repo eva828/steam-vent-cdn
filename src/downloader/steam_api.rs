@@ -2,8 +2,11 @@ use crate::connection::ConnectionExt;
 use crate::downloader::client::CdnDownloader;
 use crate::error::{DownloadError, Result, SteamSessionError, SteamVentError, WorkshopError};
 
-use async_stream::try_stream;
 use futures::Stream;
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::vec::IntoIter;
 use steam_vent::ConnectionTrait;
 use steam_vent_proto::steammessages_clientserver_2::{
     CMsgClientGetDepotDecryptionKey, CMsgClientGetDepotDecryptionKeyResponse,
@@ -133,36 +136,93 @@ impl CdnDownloader {
 
         Ok(versions)
     }
+}
 
+const VERSION_PAGE_SIZE: u32 = 100;
+
+type VersionPageFuture<'a> = Pin<Box<dyn Future<Output = Result<Vec<VersionInfo>>> + Send + 'a>>;
+
+struct VersionStream<'a> {
+    downloader: &'a CdnDownloader,
+    item_id: u64,
+    max: Option<u32>,
+    offset: u32,
+    buffer: IntoIter<VersionInfo>,
+    pending: Option<VersionPageFuture<'a>>,
+    exhausted: bool,
+}
+
+impl<'a> Stream for VersionStream<'a> {
+    type Item = Result<VersionInfo>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        loop {
+            if let Some(version) = this.buffer.next() {
+                return Poll::Ready(Some(Ok(version)));
+            }
+
+            if this.exhausted {
+                return Poll::Ready(None);
+            }
+
+            match this.pending.as_mut() {
+                Some(fut) => match fut.as_mut().poll(cx) {
+                    Poll::Pending => return Poll::Pending,
+                    Poll::Ready(result) => {
+                        this.pending = None;
+                        match result {
+                            Ok(versions) => {
+                                let count = versions.len() as u32;
+                                this.buffer = versions.into_iter();
+                                if count < VERSION_PAGE_SIZE {
+                                    this.exhausted = true;
+                                } else {
+                                    this.offset += count;
+                                }
+                            }
+                            Err(e) => {
+                                this.exhausted = true;
+                                return Poll::Ready(Some(Err(e)));
+                            }
+                        }
+                    }
+                },
+                None => {
+                    if this.max.is_some_and(|m| this.offset >= m) {
+                        this.exhausted = true;
+                        return Poll::Ready(None);
+                    }
+
+                    let request_count = this
+                        .max
+                        .map(|m| (m - this.offset).min(VERSION_PAGE_SIZE))
+                        .unwrap_or(VERSION_PAGE_SIZE);
+                    let range = this.offset..(this.offset + request_count);
+
+                    this.pending = Some(Box::pin(
+                        this.downloader.fetch_change_history(this.item_id, range),
+                    ));
+                }
+            }
+        }
+    }
+}
+
+impl CdnDownloader {
     pub fn fetch_versions<'a>(
         &'a self,
         item_id: u64,
         max: Option<u32>,
-    ) -> impl Stream<Item = Result<VersionInfo>> + Send + 'a {
-        try_stream! {
-            const PAGE_SIZE: u32 = 100;
-            let mut offset = 0u32;
-
-            while max.is_none_or(|m| offset < m) {
-                let request_count = max
-                    .map(|m| (m - offset).min(PAGE_SIZE))
-                    .unwrap_or(PAGE_SIZE);
-
-                let versions = self
-                    .fetch_change_history(item_id, offset..(offset + request_count))
-                    .await?;
-                let count = versions.len() as u32;
-
-                for version in versions {
-                    yield version;
-                }
-
-                if count < request_count {
-                    break;
-                }
-
-                offset += count;
-            }
+    ) -> impl Stream<Item = Result<VersionInfo>> + Unpin + Send + 'a {
+        VersionStream {
+            downloader: self,
+            item_id,
+            max,
+            offset: 0,
+            buffer: Vec::new().into_iter(),
+            pending: None,
+            exhausted: false,
         }
     }
 

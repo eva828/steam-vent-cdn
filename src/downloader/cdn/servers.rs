@@ -341,7 +341,11 @@ mod tests {
 
         assert_eq!(list.len(), 4);
         // Verify cache servers are sorted by load
-        let cache_hosts: Vec<&str> = list.cache_servers.iter().map(|s| s.vhost.as_str()).collect();
+        let cache_hosts: Vec<&str> = list
+            .cache_servers
+            .iter()
+            .map(|s| s.vhost.as_str())
+            .collect();
         assert_eq!(cache_hosts, vec!["cache1", "cache2"]);
     }
 

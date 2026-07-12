@@ -152,9 +152,9 @@ mod tests {
     use crate::downloader::cdn::servers::{ContentServerList, DepotContext};
     use crate::error::SteamVentError;
     use std::sync::Arc;
-    use steam_vent_proto::content_manifest::{ContentManifestMetadata, ContentManifestPayload};
-    use steam_vent_proto::content_manifest::content_manifest_payload::file_mapping::ChunkData as ProtoChunk;
     use steam_vent_proto::content_manifest::content_manifest_payload::FileMapping;
+    use steam_vent_proto::content_manifest::content_manifest_payload::file_mapping::ChunkData as ProtoChunk;
+    use steam_vent_proto::content_manifest::{ContentManifestMetadata, ContentManifestPayload};
 
     fn make_payload_with_files(files: &[(&str, u64)]) -> Vec<u8> {
         let mut payload = ContentManifestPayload::new();
@@ -189,8 +189,8 @@ mod tests {
         use std::io::Write;
         let buf = std::io::Cursor::new(Vec::new());
         let mut zip = zip::ZipWriter::new(buf);
-        let opts: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default()
-            .compression_method(zip::CompressionMethod::Stored);
+        let opts: zip::write::FileOptions<'_, ()> =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
         zip.start_file("m", opts).unwrap();
         for seg in segments {
             zip.write_all(seg).unwrap();
@@ -252,7 +252,9 @@ mod tests {
 
         assert!(matches!(
             RawManifest::decode(&zip),
-            Err(SteamVentError::Manifest(ManifestError::UnknownSegmentMagic(0xDEADBEEF)))
+            Err(SteamVentError::Manifest(
+                ManifestError::UnknownSegmentMagic(0xDEADBEEF)
+            ))
         ));
     }
 
@@ -268,7 +270,9 @@ mod tests {
 
         assert!(matches!(
             RawManifest::decode(&zip),
-            Err(SteamVentError::Manifest(ManifestError::SegmentLengthExceeded { .. }))
+            Err(SteamVentError::Manifest(
+                ManifestError::SegmentLengthExceeded { .. }
+            ))
         ));
     }
 
