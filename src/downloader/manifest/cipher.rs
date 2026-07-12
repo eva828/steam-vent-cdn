@@ -148,7 +148,7 @@ mod tests {
     #[test]
     fn decrypt_fails_on_too_short() {
         let cipher = ManifestCipher::new(&make_test_key()).unwrap();
-        let short = base64::engine::general_purpose::STANDARD.encode(&[0x42u8; 4]);
+        let short = base64::engine::general_purpose::STANDARD.encode([0x42u8; 4]);
         assert!(cipher.decrypt_string(&short).is_err());
     }
 

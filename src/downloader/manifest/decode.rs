@@ -168,7 +168,7 @@ mod tests {
 
             let mut mapping = FileMapping::new();
             mapping.filename = Some(name.to_string());
-            mapping.chunks = vec![chunk].into();
+            mapping.chunks = vec![chunk];
             mapping.flags = Some(0);
             mapping.size = Some(size);
 
@@ -221,7 +221,7 @@ mod tests {
         let zip = make_manifest_zip(&[&payload_seg, &metadata_seg]);
 
         let raw = RawManifest::decode(&zip).unwrap();
-        assert_eq!(raw.filenames_encrypted().unwrap(), false);
+        assert!(!raw.filenames_encrypted().unwrap());
         assert_eq!(raw.depot_id_for_key(1111).unwrap(), 1111);
 
         let entries = raw.into_entries(make_empty_depot()).unwrap();
