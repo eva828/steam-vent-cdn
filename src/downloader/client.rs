@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::sync::Arc;
+use parking_lot::Mutex;
 
 use crate::connection::SteamSession;
 use crate::downloader::cdn::http::CdnFetcher;
@@ -15,6 +17,7 @@ pub struct CdnDownloader {
     pub(crate) web_fetcher: HttpFetcher,
     pub(crate) content_servers: ContentServerList,
     pub(crate) download_sem: Arc<tokio::sync::Semaphore>,
+    pub(crate) depot_key_cache: Mutex<HashMap<(u32, u32), Vec<u8>>>,
 }
 
 impl CdnDownloader {
@@ -28,6 +31,7 @@ impl CdnDownloader {
             web_fetcher: HttpFetcher::new(config)?,
             content_servers,
             download_sem: Arc::new(tokio::sync::Semaphore::new(parallel_download)),
+            depot_key_cache: Mutex::new(HashMap::new()),
         })
     }
 

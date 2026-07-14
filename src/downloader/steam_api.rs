@@ -253,6 +253,17 @@ impl CdnDownloader {
     }
 
     pub(crate) async fn fetch_depot_key(&self, app_id: u32, depot_id: u32) -> Result<Vec<u8>> {
+        let cache_key = (app_id, depot_id);
+        if let Some(key) = self.depot_key_cache.lock().get(&cache_key).cloned() {
+            tracing::debug!(
+                "Depot key cache hit for app_id={}, depot_id={} ({} bytes).",
+                app_id,
+                depot_id,
+                key.len()
+            );
+            return Ok(key);
+        }
+
         tracing::debug!("Requesting depot decryption key");
 
         let mut key_req = CMsgClientGetDepotDecryptionKey::new();
@@ -269,6 +280,10 @@ impl CdnDownloader {
         if key_resp.eresult() != 1 {
             return Err(DownloadError::DepotKeyFailed(key_resp.eresult()))?;
         }
-        Ok(key_resp.depot_encryption_key().to_vec())
+        let key = key_resp.depot_encryption_key().to_vec();
+        self.depot_key_cache
+            .lock()
+            .insert(cache_key, key.clone());
+        Ok(key)
     }
 }

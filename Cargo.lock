@@ -2271,6 +2271,7 @@ dependencies = [
  "hex",
  "indicatif",
  "lzma-rs",
+ "parking_lot",
  "rayon",
  "reqwest 0.13.2",
  "rpassword",
