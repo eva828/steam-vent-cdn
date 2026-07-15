@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use tokio::sync::Semaphore;
+
 use crate::config::Config;
 use crate::error::{DownloadError, Result, SteamVentError};
 use reqwest::Client;
@@ -5,21 +8,32 @@ use reqwest::Client;
 #[derive(Clone)]
 pub(crate) struct HttpFetcher {
     client: Client,
+    semaphore: Arc<Semaphore>,
     config: Config,
 }
 
 impl HttpFetcher {
-    pub(crate) fn new(config: Config) -> Result<Self> {
+    pub(crate) fn new(config: Config, semaphore: Arc<Semaphore>) -> Result<Self> {
         let client = Client::builder()
             .timeout(config.timeout)
             .build()
             .map_err(|e| {
                 DownloadError::InvalidConfiguration(format!("Failed to build HTTP client: {}", e))
             })?;
-        Ok(Self { client, config })
+        Ok(Self {
+            client,
+            semaphore,
+            config,
+        })
     }
 
     pub(crate) async fn download_file(&self, url: &str) -> Result<Vec<u8>> {
+        let _permit = self
+            .semaphore
+            .acquire()
+            .await
+            .map_err(|_| DownloadError::SemaphoreClosed)?;
+
         let max_attempts = self.config.retry_policy.max_retries + 1;
         let retry_delay = self.config.retry_policy.retry_delay;
 

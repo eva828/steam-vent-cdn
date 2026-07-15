@@ -17,7 +17,6 @@ pub struct CdnRandomAccessReader {
     pub(crate) chunks: Vec<ChunkInfo>,
     pub(crate) depot: Arc<DepotContext>,
     pub(crate) http_fetcher: CdnFetcher,
-    pub(crate) download_sem: Arc<tokio::sync::Semaphore>,
     pub(crate) total_size: u64,
     pub(crate) position: u64,
     pub(crate) cache: HashMap<usize, Vec<u8>>,
@@ -29,7 +28,6 @@ impl CdnRandomAccessReader {
     pub(crate) fn new(
         entry: &ManifestEntry,
         http_fetcher: CdnFetcher,
-        download_sem: Arc<tokio::sync::Semaphore>,
         progress: Arc<dyn ProgressCallback>,
     ) -> Result<Self> {
         let mut chunks = entry.chunks.clone();
@@ -48,7 +46,6 @@ impl CdnRandomAccessReader {
             chunks,
             depot: Arc::clone(&entry.depot),
             http_fetcher,
-            download_sem,
             total_size,
             position: 0,
             cache: HashMap::new(),
@@ -148,7 +145,6 @@ impl AsyncRead for CdnRandomAccessReader {
                 chunk,
                 &self.depot,
                 &self.http_fetcher,
-                &self.download_sem,
                 &self.progress,
             );
             self.pending_fetch = Some(fut);

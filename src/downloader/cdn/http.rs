@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use tokio::sync::Semaphore;
+
 use crate::config::Config;
 use crate::error::{DownloadError, Result, SteamVentError};
 use reqwest::Client as HttpClient;
@@ -7,11 +10,12 @@ use super::servers::{ContentServerList, RoundRobin};
 #[derive(Clone)]
 pub(crate) struct CdnFetcher {
     http_client: HttpClient,
+    semaphore: Arc<Semaphore>,
     config: Config,
 }
 
 impl CdnFetcher {
-    pub(crate) fn new(config: Config) -> Result<Self> {
+    pub(crate) fn new(config: Config, semaphore: Arc<Semaphore>) -> Result<Self> {
         let http_client = HttpClient::builder()
             .timeout(config.timeout)
             .http2_prior_knowledge()
@@ -21,6 +25,7 @@ impl CdnFetcher {
             })?;
         Ok(Self {
             http_client,
+            semaphore,
             config,
         })
     }
@@ -32,6 +37,12 @@ impl CdnFetcher {
         manifest_id: u64,
         manifest_request_code: u64,
     ) -> Result<Vec<u8>> {
+        let _permit = self
+            .semaphore
+            .acquire()
+            .await
+            .map_err(|_| DownloadError::SemaphoreClosed)?;
+
         for server_host in servers.iter().filter(|h| servers.is_healthy(h)) {
             let manifest_url = format!(
                 "https://{}/depot/{}/manifest/{}/5/{}",
@@ -88,6 +99,12 @@ impl CdnFetcher {
         depot_id: u32,
         chunk_id: &str,
     ) -> Result<Vec<u8>> {
+        let _permit = self
+            .semaphore
+            .acquire()
+            .await
+            .map_err(|_| DownloadError::SemaphoreClosed)?;
+
         let max_attempts = self.config.retry_policy.max_retries + 1;
 
         for attempt_count in 1..=max_attempts {

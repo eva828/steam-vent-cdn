@@ -1,6 +1,7 @@
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
-use parking_lot::Mutex;
+use tokio::sync::Semaphore;
 
 use crate::connection::SteamSession;
 use crate::downloader::cdn::http::CdnFetcher;
@@ -16,7 +17,6 @@ pub struct CdnDownloader {
     pub(crate) http_fetcher: CdnFetcher,
     pub(crate) web_fetcher: HttpFetcher,
     pub(crate) content_servers: ContentServerList,
-    pub(crate) download_sem: Arc<tokio::sync::Semaphore>,
     pub(crate) depot_key_cache: Mutex<HashMap<(u32, u32), Vec<u8>>>,
 }
 
@@ -24,13 +24,13 @@ impl CdnDownloader {
     pub async fn connect(steam_session: SteamSession) -> Result<Self> {
         let config = steam_session.config().clone();
         let parallel_download = steam_session.config().parallel_download;
+        let semaphore = Arc::new(Semaphore::new(parallel_download));
         let content_servers = ContentServerList::discover(&steam_session).await?;
         Ok(Self {
             steam_session,
-            http_fetcher: CdnFetcher::new(config.clone())?,
-            web_fetcher: HttpFetcher::new(config)?,
+            http_fetcher: CdnFetcher::new(config.clone(), semaphore.clone())?,
+            web_fetcher: HttpFetcher::new(config, semaphore)?,
             content_servers,
-            download_sem: Arc::new(tokio::sync::Semaphore::new(parallel_download)),
             depot_key_cache: Mutex::new(HashMap::new()),
         })
     }
@@ -39,7 +39,6 @@ impl CdnDownloader {
         let parallel_download = self.steam_session.config().parallel_download;
         DownloadPipeline {
             http_fetcher: self.http_fetcher.clone(),
-            download_sem: Arc::clone(&self.download_sem),
             progress,
             parallel_download,
         }
@@ -54,11 +53,6 @@ impl CdnDownloader {
         entry: &ManifestEntry,
         progress: Arc<dyn ProgressCallback>,
     ) -> Result<CdnRandomAccessReader> {
-        CdnRandomAccessReader::new(
-            entry,
-            self.http_fetcher.clone(),
-            Arc::clone(&self.download_sem),
-            progress,
-        )
+        CdnRandomAccessReader::new(entry, self.http_fetcher.clone(), progress)
     }
 }

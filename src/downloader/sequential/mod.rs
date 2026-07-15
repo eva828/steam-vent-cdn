@@ -40,7 +40,6 @@ impl DownloadPipeline {
         let cancel_rx_downloads = cancel_rx.clone();
         spawn_chunk_downloads(
             &self.http_fetcher,
-            &self.download_sem,
             &self.progress,
             entry,
             download_tx,

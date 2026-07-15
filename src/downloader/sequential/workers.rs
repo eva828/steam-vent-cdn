@@ -11,7 +11,6 @@ use crate::error::{DownloadError, Result, SteamVentError};
 
 pub(crate) fn spawn_chunk_downloads(
     http_fetcher: &CdnFetcher,
-    download_sem: &Arc<tokio::sync::Semaphore>,
     progress: &Arc<dyn ProgressCallback>,
     entry: &ManifestEntry,
     download_tx: tokio::sync::mpsc::Sender<Result<RawChunk>>,
@@ -21,7 +20,6 @@ pub(crate) fn spawn_chunk_downloads(
     let depot_key = entry.depot.depot_key.clone();
 
     for chunk in entry.chunks.iter() {
-        let download_sem = Arc::clone(download_sem);
         let download_tx = download_tx.clone();
         let http_fetcher = http_fetcher.clone();
         let progress = Arc::clone(progress);
@@ -37,19 +35,6 @@ pub(crate) fn spawn_chunk_downloads(
         let mut cancel_rx = cancel_rx.clone();
 
         tokio::spawn(async move {
-            let _permit = tokio::select! {
-                result = download_sem.acquire() => match result {
-                    Ok(permit) => permit,
-                    Err(_) => {
-                        let _ = download_tx
-                            .send(Err(DownloadError::SemaphoreClosed.into()))
-                            .await;
-                        return;
-                    }
-                },
-                _ = cancel_rx.changed() => return,
-            };
-
             let server_list = RoundRobin::new(&depot.servers);
             let result = tokio::select! {
                 r = http_fetcher.download_chunk(

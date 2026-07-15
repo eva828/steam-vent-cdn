@@ -281,9 +281,7 @@ impl CdnDownloader {
             return Err(DownloadError::DepotKeyFailed(key_resp.eresult()))?;
         }
         let key = key_resp.depot_encryption_key().to_vec();
-        self.depot_key_cache
-            .lock()
-            .insert(cache_key, key.clone());
+        self.depot_key_cache.lock().insert(cache_key, key.clone());
         Ok(key)
     }
 }

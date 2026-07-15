@@ -17,7 +17,6 @@ pub(crate) fn build_fetch_future(
     chunk: &ChunkInfo,
     depot: &Arc<DepotContext>,
     http_fetcher: &CdnFetcher,
-    download_sem: &Arc<tokio::sync::Semaphore>,
     progress: &Arc<dyn ProgressCallback>,
 ) -> ChunkFetchFuture {
     let chunk_id = hex::encode(&chunk.sha1);
@@ -28,14 +27,8 @@ pub(crate) fn build_fetch_future(
     let depot = Arc::clone(depot);
     let depot_key = depot.depot_key.clone();
     let http_fetcher = http_fetcher.clone();
-    let download_sem = Arc::clone(download_sem);
 
     Box::pin(async move {
-        let _permit = download_sem
-            .acquire()
-            .await
-            .map_err(|_| DownloadError::SemaphoreClosed)?;
-
         let compressed_data = http_fetcher
             .download_chunk(&RoundRobin::new(&depot.servers), depot.depot_id, &chunk_id)
             .await?;
