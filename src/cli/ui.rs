@@ -14,9 +14,15 @@ fn format_timestamp(timestamp: u32) -> String {
 
 pub fn display_version_history(item_id: u64, versions: &[VersionInfo]) {
     tracing::info!("Workshop item {} version history:", item_id);
-    tracing::info!("{:<20} | {:<20} | Description", "Timestamp", "Date");
     tracing::info!(
-        "{:-<20}-+-{:-<20}-+-{}",
+        "{:<20} | {:<20} | {:<20} | Description",
+        "Timestamp",
+        "Manifest ID",
+        "Date"
+    );
+    tracing::info!(
+        "{:-<20}-+-{:-<20}-+-{:-<20}-+-{}",
+        "--------------------",
         "--------------------",
         "--------------------",
         "------------------------"
@@ -30,7 +36,13 @@ pub fn display_version_history(item_id: u64, versions: &[VersionInfo]) {
         } else {
             format!("{}{}", version.description, latest_mark)
         };
-        tracing::info!("{:<20} | {:<20} | {}", version.timestamp, date, description);
+        tracing::info!(
+            "{:<20} | {:<20} | {:<20} | {}",
+            version.timestamp,
+            version.manifest_id,
+            date,
+            description
+        );
     }
 
     tracing::info!("Total: {} versions", versions.len());
