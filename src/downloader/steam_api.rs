@@ -1,13 +1,12 @@
 use crate::connection::ConnectionExt;
 use crate::downloader::client::CdnDownloader;
-use crate::error::{DownloadError, Result, SteamSessionError, SteamVentError, WorkshopError};
+use crate::error::{DownloadError, Result, WorkshopError};
 
 use futures::Stream;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::vec::IntoIter;
-use steam_vent::ConnectionTrait;
 use steam_vent_proto::steammessages_clientserver_2::{
     CMsgClientGetDepotDecryptionKey, CMsgClientGetDepotDecryptionKeyResponse,
 };
@@ -240,13 +239,15 @@ impl CdnDownloader {
         code_req.set_manifest_id(manifest_id);
         code_req.set_app_branch("public".into());
 
+        let config = self.steam_session.config();
+        let max_retries = config.retry_policy.max_retries;
+        let retry_delay = config.retry_policy.retry_delay;
+
         let code_resp = self
             .steam_session
             .connection()
-            .service_method(code_req)
-            .await
-            .map_err(|e| SteamSessionError::ApiCallFailed(Box::new(e)))
-            .map_err(SteamVentError::SteamSession)?;
+            .service_method_with_retry(code_req, max_retries, retry_delay)
+            .await?;
         Ok(code_resp
             .manifest_request_code
             .ok_or(DownloadError::ManifestRequestCodeFailed)?)
@@ -270,13 +271,15 @@ impl CdnDownloader {
         key_req.set_depot_id(depot_id);
         key_req.set_app_id(app_id);
 
+        let config = self.steam_session.config();
+        let max_retries = config.retry_policy.max_retries;
+        let retry_delay = config.retry_policy.retry_delay;
+
         let key_resp: CMsgClientGetDepotDecryptionKeyResponse = self
             .steam_session
             .connection()
-            .job(key_req)
-            .await
-            .map_err(|e| SteamSessionError::ApiCallFailed(Box::new(e)))
-            .map_err(SteamVentError::SteamSession)?;
+            .job_with_retry(key_req, max_retries, retry_delay)
+            .await?;
         if key_resp.eresult() != 1 {
             return Err(DownloadError::DepotKeyFailed(key_resp.eresult()))?;
         }

@@ -65,6 +65,31 @@ impl SteamSession {
     }
 }
 
+macro_rules! retry_loop {
+    ($fut:expr, $max_retries:expr, $retry_delay:expr) => {{
+        let mut retry_count = 0;
+        loop {
+            match ($fut).await {
+                Ok(resp) => break Ok(resp),
+                Err(e) if retry_count < $max_retries
+                    && matches!(&e, steam_vent::NetworkError::ApiError(
+                        steam_vent::EResult::NotLoggedOn | steam_vent::EResult::AccessDenied,
+                    )) =>
+                {
+                    tracing::debug!(
+                        "Login not fully established, retrying (attempt {}): {}",
+                        retry_count + 1,
+                        e,
+                    );
+                    tokio::time::sleep($retry_delay).await;
+                    retry_count += 1;
+                }
+                Err(e) => break Err(SteamSessionError::from(e).into()),
+            }
+        }
+    }};
+}
+
 pub(crate) trait ConnectionExt: steam_vent::ConnectionTrait + Sync {
     fn service_method_with_retry<'a, R>(
         &'a self,
@@ -77,29 +102,22 @@ pub(crate) trait ConnectionExt: steam_vent::ConnectionTrait + Sync {
         R::Response: Send,
     {
         async move {
-            let mut retry_count = 0;
-            loop {
-                let e = match self.service_method(req.clone()).await {
-                    Ok(resp) => return Ok(resp),
-                    Err(e) => e,
-                };
+            retry_loop!(self.service_method(req.clone()), max_retries, retry_delay)
+        }
+    }
 
-                match &e {
-                    steam_vent::NetworkError::ApiError(
-                        steam_vent::EResult::NotLoggedOn | steam_vent::EResult::AccessDenied,
-                    ) if retry_count < max_retries => {
-                        tracing::debug!(
-                            "Login not fully established, retrying {} (attempt {}): {}",
-                            std::any::type_name::<R>(),
-                            retry_count + 1,
-                            e
-                        );
-                        tokio::time::sleep(retry_delay).await;
-                        retry_count += 1;
-                    }
-                    _ => return Err(SteamSessionError::from(e).into()),
-                }
-            }
+    fn job_with_retry<'a, Msg, Rsp>(
+        &'a self,
+        msg: Msg,
+        max_retries: u32,
+        retry_delay: std::time::Duration,
+    ) -> impl std::future::Future<Output = Result<Rsp>> + Send + 'a
+    where
+        Msg: steam_vent::NetMessage + Clone + Send + 'static,
+        Rsp: steam_vent::NetMessage + Send,
+    {
+        async move {
+            retry_loop!(self.job(msg.clone()), max_retries, retry_delay)
         }
     }
 }
