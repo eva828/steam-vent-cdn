@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use futures::stream::TryStreamExt;
@@ -10,7 +10,7 @@ use steam_vent_cdn::downloader::{ItemDetails, Manifest, VersionInfo};
 use steam_vent_cdn::error::{Result, WorkshopError};
 
 use super::progress::ProgressManager;
-use super::{Args, ui, writer};
+use super::{ui, writer};
 
 pub async fn run_list_versions_pipeline(downloader: &CdnDownloader, item_id: u64) -> Result<()> {
     let versions: Vec<_> = downloader
@@ -21,22 +21,26 @@ pub async fn run_list_versions_pipeline(downloader: &CdnDownloader, item_id: u64
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_download_pipeline(
-    args: &Args,
     downloader: &CdnDownloader,
     multi: &MultiProgress,
+    app_id: u32,
+    item_id: u64,
+    output: PathBuf,
+    timestamp: Option<u32>,
+    manifest_id: Option<u64>,
 ) -> Result<()> {
-    let version = resolve_version(downloader, args.item_id, args.timestamp).await?;
+    let version = resolve_version(downloader, item_id, timestamp, manifest_id).await?;
 
     tracing::info!("Downloading version with timestamp: {}", version.timestamp);
     tracing::info!("Description: {}", version.description);
 
-    let details = downloader.fetch_item_details(args.item_id).await?;
+    let details = downloader.fetch_item_details(item_id).await?;
 
-    let base_path = args
-        .output
-        .join(args.app_id.to_string())
-        .join(args.item_id.to_string())
+    let base_path = output
+        .join(app_id.to_string())
+        .join(item_id.to_string())
         .join(version.timestamp.to_string());
 
     if let Some(file_url) = &details.file_url {
@@ -44,7 +48,7 @@ pub async fn run_download_pipeline(
         download_web_item(downloader, file_url, &filename, &base_path).await?;
     } else {
         let manifest = downloader
-            .fetch_manifest_by_id(version.manifest_id, args.app_id)
+            .fetch_manifest_by_id(version.manifest_id, app_id)
             .await?;
 
         download_cdn_files(&manifest, &base_path, downloader, multi).await?;
@@ -57,8 +61,20 @@ async fn resolve_version(
     downloader: &CdnDownloader,
     item_id: u64,
     timestamp: Option<u32>,
+    manifest_id: Option<u64>,
 ) -> Result<VersionInfo> {
-    if let Some(ts) = timestamp {
+    if let Some(mid) = manifest_id {
+        let mut stream = Box::pin(downloader.fetch_versions(item_id, None));
+        while let Some(version) = stream.try_next().await? {
+            if version.manifest_id == mid {
+                return Ok(version);
+            }
+        }
+        Err(WorkshopError::VersionNotFound(format!(
+            "Manifest ID {}",
+            mid
+        )))?
+    } else if let Some(ts) = timestamp {
         let mut stream = Box::pin(downloader.fetch_versions(item_id, None));
         while let Some(version) = stream.try_next().await? {
             if version.timestamp == ts {
@@ -93,7 +109,7 @@ async fn download_web_item(
     downloader: &CdnDownloader,
     file_url: &str,
     filename: &str,
-    base_path: &Path,
+    base_path: &std::path::Path,
 ) -> Result<()> {
     let output_path = base_path.join(filename);
     tracing::info!("Downloading web file from {}", file_url);
@@ -107,7 +123,7 @@ async fn download_web_item(
 
 async fn download_cdn_files(
     manifest: &Manifest,
-    base_path: &Path,
+    base_path: &std::path::Path,
     downloader: &CdnDownloader,
     multi: &MultiProgress,
 ) -> Result<()> {

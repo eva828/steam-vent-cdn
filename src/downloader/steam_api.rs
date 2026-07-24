@@ -12,8 +12,8 @@ use steam_vent_proto::steammessages_clientserver_2::{
 };
 use steam_vent_proto::steammessages_contentsystem_steamclient::CContentServerDirectory_GetManifestRequestCode_Request;
 use steam_vent_proto::steammessages_publishedfile_steamclient::{
-    CPublishedFile_GetChangeHistory_Request, CPublishedFile_GetDetails_Request,
-    PublishedFileDetails,
+    cpublished_file_query_files_request::KVTag, CPublishedFile_GetChangeHistory_Request,
+    CPublishedFile_GetDetails_Request, CPublishedFile_QueryFiles_Request, PublishedFileDetails,
 };
 
 #[derive(Debug, Clone)]
@@ -80,6 +80,38 @@ impl CdnDownloader {
         }
 
         Ok(details_resp.publishedfiledetails[0].clone().into())
+    }
+
+    pub async fn fetch_item_id_by_slug(&self, app_id: u32, slug: &str) -> Result<u64> {
+        let mut kv = KVTag::new();
+        kv.set_key("name".into());
+        kv.set_value(slug.into());
+
+        let mut req = CPublishedFile_QueryFiles_Request::new();
+        req.set_appid(app_id);
+        req.set_query_type(0);
+        req.set_numperpage(2);
+        req.required_kv_tags.push(kv);
+
+        let config = self.steam_session.config();
+        let max_retries = config.retry_policy.max_retries;
+        let retry_delay = config.retry_policy.retry_delay;
+
+        let resp = self
+            .steam_session
+            .connection()
+            .service_method_with_retry(req, max_retries, retry_delay)
+            .await?;
+
+        if resp.publishedfiledetails.is_empty() {
+            return Err(WorkshopError::ItemNotFoundBySlug(slug.into()))?;
+        }
+
+        if resp.total() > 1 {
+            return Err(WorkshopError::AmbiguousSlug(slug.into(), resp.total()))?;
+        }
+
+        Ok(resp.publishedfiledetails[0].publishedfileid())
     }
 
     pub async fn fetch_change_history(

@@ -153,6 +153,15 @@ pub enum WorkshopError {
 
     #[error("Version {0} not found")]
     VersionNotFound(String),
+
+    #[error("Either ITEM_ID or --slug must be provided")]
+    MissingItemId,
+
+    #[error("No workshop item found with slug '{0}'")]
+    ItemNotFoundBySlug(String),
+
+    #[error("Multiple workshop items match slug '{0}' ({1} total). Use item ID to disambiguate.")]
+    AmbiguousSlug(String, u32),
 }
 
 #[derive(Error, Debug)]
