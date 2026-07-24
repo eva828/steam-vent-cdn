@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Semaphore;
 
 use crate::config::Config;
@@ -43,50 +44,84 @@ impl CdnFetcher {
             .await
             .map_err(|_| DownloadError::SemaphoreClosed)?;
 
-        for server_host in servers.iter().filter(|h| servers.is_healthy(h)) {
-            let manifest_url = format!(
-                "https://{}/depot/{}/manifest/{}/5/{}",
-                server_host, depot_id, manifest_id, manifest_request_code
-            );
-            tracing::debug!("Downloading manifest from {}", manifest_url);
+        for round in 0..=1 {
+            let rr = RoundRobin::new(servers);
+            for _ in 0..servers.len() {
+                let Ok(server_host) = rr.next() else { break };
+                let manifest_url = format!(
+                    "https://{}/depot/{}/manifest/{}/5/{}",
+                    server_host, depot_id, manifest_id, manifest_request_code
+                );
+                tracing::debug!("Downloading manifest from {}", manifest_url);
 
-            let fetch_result = async {
-                let resp = self.http_client.get(&manifest_url).send().await?;
+                let fetch_result = async {
+                    let resp = self.http_client.get(&manifest_url).send().await?;
 
-                if !resp.status().is_success() {
-                    let status = resp.status();
-                    let headers: Vec<String> = resp
-                        .headers()
-                        .iter()
-                        .map(|(k, v)| format!("{}: {}", k, v.to_str().unwrap_or("<binary>")))
-                        .collect();
-                    let body = resp.bytes().await.unwrap_or_default();
-                    let body_preview = String::from_utf8_lossy(&body[..body.len().min(256)]);
-                    tracing::debug!(
-                        "Manifest request failed (status={}, headers=[{}]): {}",
-                        status,
-                        headers.join(", "),
-                        body_preview
-                    );
-                    return Err(DownloadError::HttpError { status })?;
+                    if !resp.status().is_success() {
+                        let status = resp.status();
+                        let headers: Vec<String> = resp
+                            .headers()
+                            .iter()
+                            .map(|(k, v)| format!("{}: {}", k, v.to_str().unwrap_or("<binary>")))
+                            .collect();
+                        let body = resp.bytes().await.unwrap_or_default();
+                        let body_preview = String::from_utf8_lossy(&body[..body.len().min(256)]);
+                        tracing::debug!(
+                            "Manifest request failed (status={}, headers=[{}]): {}",
+                            status,
+                            headers.join(", "),
+                            body_preview
+                        );
+                        return Err(DownloadError::HttpError { status })?;
+                    }
+                    resp.bytes().await.map_err(SteamVentError::from)
                 }
-                resp.bytes().await.map_err(SteamVentError::from)
+                .await;
+
+                match fetch_result {
+                    Ok(b) => {
+                        tracing::info!(
+                            "Downloaded manifest from {} ({} bytes)",
+                            server_host,
+                            b.len()
+                        );
+                        servers.report_success(server_host);
+                        return Ok(b.to_vec());
+                    }
+                    Err(e) => {
+                        servers.report_failure(server_host);
+                        match &e {
+                            SteamVentError::Download(DownloadError::HttpError { status }) => {
+                                tracing::debug!(
+                                    "Failed to fetch manifest from {}: HTTP {}",
+                                    server_host,
+                                    status
+                                );
+                            }
+                            _ => {
+                                tracing::debug!(
+                                    "Failed to fetch manifest from {}: {}",
+                                    server_host,
+                                    e
+                                );
+                            }
+                        }
+                    }
+                }
             }
-            .await;
 
-            match fetch_result {
-                Ok(b) => {
-                    tracing::info!(
-                        "Downloaded manifest from {} ({} bytes)",
-                        server_host,
-                        b.len()
+            // All servers failed — wait for blacklist recovery if applicable
+            if round == 0 {
+                let remaining = servers.max_blacklist_remaining();
+                if remaining > Duration::ZERO {
+                    let wait = remaining + Duration::from_secs(2);
+                    tracing::warn!(
+                        "All servers failed, waiting {:.1}s for blacklist recovery...",
+                        wait.as_secs_f64()
                     );
-                    servers.report_success(server_host);
-                    return Ok(b.to_vec());
-                }
-                Err(e) => {
-                    servers.report_failure(server_host);
-                    tracing::debug!("Failed to fetch manifest from {}: {}", server_host, e);
+                    tokio::time::sleep(wait).await;
+                } else {
+                    break;
                 }
             }
         }
@@ -107,90 +142,108 @@ impl CdnFetcher {
 
         let max_attempts = self.config.retry_policy.max_retries + 1;
 
-        for attempt_count in 1..=max_attempts {
-            let server_host = servers.next()?;
-            let chunk_url = format!(
-                "https://{}/depot/{}/chunk/{}",
-                server_host, depot_id, chunk_id
-            );
+        for round in 0..=1 {
+            for attempt_count in 1..=max_attempts {
+                let server_host = servers.next()?;
+                let chunk_url = format!(
+                    "https://{}/depot/{}/chunk/{}",
+                    server_host, depot_id, chunk_id
+                );
 
-            tracing::debug!(
-                "Attempting chunk {} from {} (attempt {}/{})",
-                chunk_id,
-                server_host,
-                attempt_count,
-                max_attempts
-            );
+                tracing::debug!(
+                    "Attempting chunk {} from {} (attempt {}/{})",
+                    chunk_id,
+                    server_host,
+                    attempt_count,
+                    max_attempts
+                );
 
-            let mut should_sleep = true;
+                let mut should_sleep = true;
 
-            match self.http_client.get(&chunk_url).send().await {
-                Ok(resp) if resp.status().is_success() => {
-                    let data = resp.bytes().await?;
-                    servers.report_success(server_host);
-                    tracing::debug!(
-                        "Downloaded chunk {} from {} (compressed: {} bytes)",
-                        chunk_id,
-                        server_host,
-                        data.len()
-                    );
-                    return Ok(data.to_vec());
-                }
-                Ok(resp) => {
-                    let status = resp.status();
-                    servers.report_failure(server_host);
+                match self.http_client.get(&chunk_url).send().await {
+                    Ok(resp) if resp.status().is_success() => {
+                        let data = resp.bytes().await?;
+                        servers.report_success(server_host);
+                        tracing::debug!(
+                            "Downloaded chunk {} from {} (compressed: {} bytes)",
+                            chunk_id,
+                            server_host,
+                            data.len()
+                        );
+                        return Ok(data.to_vec());
+                    }
+                    Ok(resp) => {
+                        let status = resp.status();
+                        servers.report_failure(server_host);
 
-                    let body = resp.bytes().await.unwrap_or_default();
-                    let body_preview = String::from_utf8_lossy(&body[..body.len().min(256)]);
-                    tracing::debug!(
-                        "Retrying chunk {} from {} (attempt {}/{}, status: {}, body: {})",
-                        chunk_id,
-                        server_host,
-                        attempt_count,
-                        max_attempts,
-                        status,
-                        body_preview,
-                    );
-                    if status == reqwest::StatusCode::NOT_FOUND
-                        || status == reqwest::StatusCode::FORBIDDEN
-                    {
-                        should_sleep = false;
+                        let body = resp.bytes().await.unwrap_or_default();
+                        let body_preview = String::from_utf8_lossy(&body[..body.len().min(256)]);
+                        tracing::debug!(
+                            "Retrying chunk {} from {} (attempt {}/{}, status: {}, body: {})",
+                            chunk_id,
+                            server_host,
+                            attempt_count,
+                            max_attempts,
+                            status,
+                            body_preview,
+                        );
+                        if status == reqwest::StatusCode::NOT_FOUND
+                            || status == reqwest::StatusCode::FORBIDDEN
+                        {
+                            should_sleep = false;
+                        }
+                    }
+                    Err(e) => {
+                        servers.report_failure(server_host);
+
+                        let error_kind = if e.is_timeout() {
+                            "timeout"
+                        } else if e.is_connect() {
+                            "connection"
+                        } else if e.is_request() {
+                            "request"
+                        } else {
+                            "network"
+                        };
+
+                        tracing::debug!(
+                            "Retrying chunk {} from {} (attempt {}/{}, error kind: {}, error: {})",
+                            chunk_id,
+                            server_host,
+                            attempt_count,
+                            max_attempts,
+                            error_kind,
+                            e
+                        );
                     }
                 }
-                Err(e) => {
-                    servers.report_failure(server_host);
 
-                    let error_kind = if e.is_timeout() {
-                        "timeout"
-                    } else if e.is_connect() {
-                        "connection"
-                    } else if e.is_request() {
-                        "request"
-                    } else {
-                        "network"
-                    };
-
+                if attempt_count < max_attempts && should_sleep {
+                    let delay_ms = self.config.retry_policy.retry_delay.as_millis();
                     tracing::debug!(
-                        "Retrying chunk {} from {} (attempt {}/{}, error kind: {}, error: {})",
-                        chunk_id,
-                        server_host,
-                        attempt_count,
-                        max_attempts,
-                        error_kind,
-                        e
+                        "Waiting {}ms before retry {} for chunk {}",
+                        delay_ms,
+                        attempt_count + 1,
+                        chunk_id
                     );
+                    tokio::time::sleep(self.config.retry_policy.retry_delay).await;
                 }
             }
 
-            if attempt_count < max_attempts && should_sleep {
-                let delay_ms = self.config.retry_policy.retry_delay.as_millis();
-                tracing::debug!(
-                    "Waiting {}ms before retry {} for chunk {}",
-                    delay_ms,
-                    attempt_count + 1,
-                    chunk_id
-                );
-                tokio::time::sleep(self.config.retry_policy.retry_delay).await;
+            // All servers failed — wait for blacklist recovery if applicable
+            if round == 0 {
+                let remaining = servers.max_blacklist_remaining();
+                if remaining > Duration::ZERO {
+                    let wait = remaining + Duration::from_secs(2);
+                    tracing::warn!(
+                        "All servers failed for chunk {}, waiting {:.1}s for blacklist recovery...",
+                        chunk_id,
+                        wait.as_secs_f64()
+                    );
+                    tokio::time::sleep(wait).await;
+                } else {
+                    break;
+                }
             }
         }
 

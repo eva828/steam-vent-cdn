@@ -200,6 +200,22 @@ impl ContentServerList {
             .count()
     }
 
+    /// Return the longest remaining blacklist timeout across all servers.
+    /// Returns `Duration::ZERO` if no servers are blacklisted.
+    pub(crate) fn max_blacklist_remaining(&self) -> Duration {
+        let health = self.health.lock().unwrap();
+        health
+            .values()
+            .filter(|h| h.blacklisted)
+            .filter_map(|h| {
+                let timeout = blacklist_timeout(h.blacklist_count);
+                let elapsed = h.blacklisted_at?.elapsed();
+                Some(timeout.saturating_sub(elapsed))
+            })
+            .max()
+            .unwrap_or(Duration::ZERO)
+    }
+
     fn is_server_healthy(&self, health: &HashMap<String, ServerHealth>, server_host: &str) -> bool {
         health
             .get(server_host)
@@ -216,16 +232,6 @@ impl ContentServerList {
             .unwrap_or(true)
     }
 
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &str> + '_ {
-        let iter: Box<dyn Iterator<Item = &ContentServer> + '_> = match self.server_mode {
-            ServerMode::Cdn => Box::new(self.cdn_servers.iter()),
-            ServerMode::Cache => Box::new(self.cache_servers.iter()),
-            ServerMode::CachePreferred => {
-                Box::new(self.cache_servers.iter().chain(self.cdn_servers.iter()))
-            }
-        };
-        iter.map(|s| s.vhost.as_str())
-    }
 }
 
 impl<'a> RoundRobin<'a> {
@@ -281,6 +287,10 @@ impl<'a> RoundRobin<'a> {
 
     pub(crate) fn healthy_count(&self) -> usize {
         self.list.healthy_count()
+    }
+
+    pub(crate) fn max_blacklist_remaining(&self) -> Duration {
+        self.list.max_blacklist_remaining()
     }
 }
 

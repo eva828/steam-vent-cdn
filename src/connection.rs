@@ -72,12 +72,10 @@ macro_rules! retry_loop {
             match ($fut).await {
                 Ok(resp) => break Ok(resp),
                 Err(e) if retry_count < $max_retries
-                    && matches!(&e, steam_vent::NetworkError::ApiError(
-                        steam_vent::EResult::NotLoggedOn | steam_vent::EResult::AccessDenied,
-                    )) =>
+                    && is_transient(&e) =>
                 {
                     tracing::debug!(
-                        "Login not fully established, retrying (attempt {}): {}",
+                        "Transient error, retrying (attempt {}): {}",
                         retry_count + 1,
                         e,
                     );
@@ -88,6 +86,26 @@ macro_rules! retry_loop {
             }
         }
     }};
+}
+
+fn is_transient(err: &steam_vent::NetworkError) -> bool {
+    use steam_vent::EResult;
+    use steam_vent::NetworkError;
+    matches!(
+        err,
+        NetworkError::IO(_)
+            | NetworkError::Ws(_)
+            | NetworkError::Timeout
+            | NetworkError::EOF
+            | NetworkError::ApiError(
+                EResult::Timeout
+                    | EResult::ServiceUnavailable
+                    | EResult::TryAnotherCM
+                    | EResult::NoConnection
+                    | EResult::Busy
+                    | EResult::RateLimitExceeded,
+            )
+    )
 }
 
 pub(crate) trait ConnectionExt: steam_vent::ConnectionTrait + Sync {
