@@ -38,6 +38,8 @@ pub async fn run_download_pipeline(
 
     let details = downloader.fetch_item_details(item_id).await?;
 
+    let depot_id = details.consumer_appid.unwrap_or(app_id);
+
     let base_path = output
         .join(app_id.to_string())
         .join(item_id.to_string())
@@ -48,7 +50,7 @@ pub async fn run_download_pipeline(
         download_web_item(downloader, file_url, &filename, &base_path).await?;
     } else {
         let manifest = downloader
-            .fetch_manifest_by_id(version.manifest_id, app_id)
+            .fetch_manifest_by_id(version.manifest_id, depot_id)
             .await?;
 
         download_cdn_files(&manifest, &base_path, downloader, multi).await?;
