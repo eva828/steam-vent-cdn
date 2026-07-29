@@ -89,7 +89,14 @@ impl CdnFetcher {
                         return Ok(b.to_vec());
                     }
                     Err(e) => {
-                        servers.report_failure(server_host);
+                        let is_client_error = matches!(
+                            &e,
+                            SteamVentError::Download(DownloadError::HttpError { status })
+                                if status.as_u16() == 404 || status.as_u16() == 403
+                        );
+                        if !is_client_error {
+                            servers.report_failure(server_host);
+                        }
                         match &e {
                             SteamVentError::Download(DownloadError::HttpError { status }) => {
                                 tracing::debug!(

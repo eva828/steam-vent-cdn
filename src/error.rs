@@ -133,9 +133,37 @@ pub enum ManifestError {
     MissingField(&'static str),
 }
 
+// EResult values: https://steamerrors.com/
+#[derive(Debug)]
+pub enum WorkshopResult {
+    Unknown,
+    Ok,
+    FileNotFound,
+    AccessDenied,
+    Other(u32),
+}
+
+impl From<Option<u32>> for WorkshopResult {
+    fn from(value: Option<u32>) -> Self {
+        match value {
+            None => Self::Unknown,
+            Some(1) => Self::Ok,
+            Some(9) => Self::FileNotFound,
+            Some(15) => Self::AccessDenied,
+            Some(n) => Self::Other(n),
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum WorkshopError {
+    #[error("GetDetails failed for item {item_id}: {result:?}")]
+    GetDetailsFailed {
+        item_id: u64,
+        result: WorkshopResult,
+    },
+
     #[error("Item details for {0} is missing or empty")]
     ItemDetailsMissing(u64),
 

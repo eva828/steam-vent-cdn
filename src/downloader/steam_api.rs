@@ -1,6 +1,6 @@
 use crate::connection::ConnectionExt;
 use crate::downloader::client::CdnDownloader;
-use crate::error::{DownloadError, Result, WorkshopError};
+use crate::error::{DownloadError, Result, WorkshopError, WorkshopResult};
 
 use futures::Stream;
 use std::future::Future;
@@ -26,13 +26,16 @@ pub struct VersionInfo {
 #[derive(Debug, Clone)]
 pub struct ItemDetails {
     pub publishedfileid: u64,
+    pub result: Option<u32>,
     pub title: String,
     pub description: Option<String>,
     pub consumer_appid: Option<u32>,
+    pub creator_appid: Option<u32>,
     pub manifest_id: Option<u64>,
     pub preview_url: Option<String>,
     pub file_url: Option<String>,
     pub filename: Option<String>,
+    pub file_type: Option<u32>,
     pub time_created: Option<u32>,
     pub time_updated: Option<u32>,
     pub creator: Option<u64>,
@@ -43,13 +46,16 @@ impl From<PublishedFileDetails> for ItemDetails {
     fn from(details: PublishedFileDetails) -> Self {
         Self {
             publishedfileid: details.publishedfileid(),
+            result: details.result,
             title: details.title.unwrap_or_default(),
             description: details.file_description,
             consumer_appid: details.consumer_appid,
+            creator_appid: details.creator_appid,
             manifest_id: details.hcontent_file,
             preview_url: details.preview_url.clone(),
             file_url: details.file_url.clone(),
             filename: details.filename.clone(),
+            file_type: details.file_type,
             time_created: details.time_created,
             time_updated: details.time_updated,
             creator: details.creator,
@@ -77,6 +83,12 @@ impl CdnDownloader {
 
         if details_resp.publishedfiledetails.is_empty() {
             return Err(WorkshopError::ItemDetailsMissing(item_id))?;
+        }
+
+        let item_details_raw = &details_resp.publishedfiledetails[0];
+        let result = WorkshopResult::from(item_details_raw.result);
+        if !matches!(result, WorkshopResult::Ok) {
+            return Err(WorkshopError::GetDetailsFailed { item_id, result })?;
         }
 
         Ok(details_resp.publishedfiledetails[0].clone().into())
