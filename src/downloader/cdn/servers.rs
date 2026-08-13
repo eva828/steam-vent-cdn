@@ -231,7 +231,6 @@ impl ContentServerList {
             })
             .unwrap_or(true)
     }
-
 }
 
 impl<'a> RoundRobin<'a> {

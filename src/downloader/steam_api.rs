@@ -12,8 +12,9 @@ use steam_vent_proto::steammessages_clientserver_2::{
 };
 use steam_vent_proto::steammessages_contentsystem_steamclient::CContentServerDirectory_GetManifestRequestCode_Request;
 use steam_vent_proto::steammessages_publishedfile_steamclient::{
-    cpublished_file_query_files_request::KVTag, CPublishedFile_GetChangeHistory_Request,
-    CPublishedFile_GetDetails_Request, CPublishedFile_QueryFiles_Request, PublishedFileDetails,
+    CPublishedFile_GetChangeHistory_Request, CPublishedFile_GetDetails_Request,
+    CPublishedFile_QueryFiles_Request, PublishedFileDetails,
+    cpublished_file_query_files_request::KVTag,
 };
 
 #[derive(Debug, Clone)]

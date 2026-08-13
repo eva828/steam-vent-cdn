@@ -1,8 +1,8 @@
 mod cli;
 
 use clap::Parser;
-use cli::args::ItemSpec;
 use cli::Args;
+use cli::args::ItemSpec;
 use steam_vent_cdn::connection::SteamClient;
 use steam_vent_cdn::downloader::client::CdnDownloader;
 use steam_vent_cdn::error::{Result, WorkshopError};

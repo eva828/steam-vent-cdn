@@ -289,5 +289,3 @@ impl CdnFetcher {
         Err(DownloadError::AllServersFailed)?
     }
 }
-
-

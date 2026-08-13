@@ -71,9 +71,7 @@ macro_rules! retry_loop {
         loop {
             match ($fut).await {
                 Ok(resp) => break Ok(resp),
-                Err(e) if retry_count < $max_retries
-                    && is_transient(&e) =>
-                {
+                Err(e) if retry_count < $max_retries && is_transient(&e) => {
                     tracing::debug!(
                         "Transient error, retrying (attempt {}): {}",
                         retry_count + 1,
@@ -119,9 +117,7 @@ pub(crate) trait ConnectionExt: steam_vent::ConnectionTrait + Sync {
         R: steam_vent::ServiceMethodRequest + Clone + Send + 'static,
         R::Response: Send,
     {
-        async move {
-            retry_loop!(self.service_method(req.clone()), max_retries, retry_delay)
-        }
+        async move { retry_loop!(self.service_method(req.clone()), max_retries, retry_delay) }
     }
 
     fn job_with_retry<'a, Msg, Rsp>(
@@ -134,9 +130,7 @@ pub(crate) trait ConnectionExt: steam_vent::ConnectionTrait + Sync {
         Msg: steam_vent::NetMessage + Clone + Send + 'static,
         Rsp: steam_vent::NetMessage + Send,
     {
-        async move {
-            retry_loop!(self.job(msg.clone()), max_retries, retry_delay)
-        }
+        async move { retry_loop!(self.job(msg.clone()), max_retries, retry_delay) }
     }
 }
 
