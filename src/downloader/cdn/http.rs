@@ -38,6 +38,18 @@ impl CdnFetcher {
         manifest_id: u64,
         manifest_request_code: u64,
     ) -> Result<Vec<u8>> {
+        if let Some(cache) = &self.config.cache
+            && let Some(data) = cache.get_manifest(depot_id, manifest_id).await
+        {
+            tracing::debug!(
+                "Manifest {}/{} cache hit ({} bytes)",
+                depot_id,
+                manifest_id,
+                data.len()
+            );
+            return Ok(data);
+        }
+
         let _permit = self
             .semaphore
             .acquire()
@@ -86,6 +98,9 @@ impl CdnFetcher {
                             b.len()
                         );
                         servers.report_success(server_host);
+                        if let Some(cache) = &self.config.cache {
+                            cache.put_manifest(depot_id, manifest_id, &b).await;
+                        }
                         return Ok(b.to_vec());
                     }
                     Err(e) => {
@@ -141,6 +156,13 @@ impl CdnFetcher {
         depot_id: u32,
         chunk_id: &str,
     ) -> Result<Vec<u8>> {
+        if let Some(cache) = &self.config.cache
+            && let Some(data) = cache.get_chunk(chunk_id).await
+        {
+            tracing::debug!("Chunk {} cache hit ({} bytes)", chunk_id, data.len());
+            return Ok(data);
+        }
+
         let _permit = self
             .semaphore
             .acquire()
@@ -177,6 +199,9 @@ impl CdnFetcher {
                             server_host,
                             data.len()
                         );
+                        if let Some(cache) = &self.config.cache {
+                            cache.put_chunk(chunk_id, &data).await;
+                        }
                         return Ok(data.to_vec());
                     }
                     Ok(resp) => {
@@ -264,3 +289,5 @@ impl CdnFetcher {
         Err(DownloadError::AllServersFailed)?
     }
 }
+
+

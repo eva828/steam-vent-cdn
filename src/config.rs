@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use crate::downloader::cdn::CdnCache;
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
 pub enum ServerMode {
     #[default]
@@ -42,6 +44,7 @@ pub struct Config {
     pub app_id: u32,
     pub parallel_download: usize,
     pub server_mode: ServerMode,
+    pub cache: Option<CdnCache>,
 }
 
 impl Default for Config {
@@ -53,6 +56,7 @@ impl Default for Config {
             app_id: 1281930,
             parallel_download: 16,
             server_mode: ServerMode::default(),
+            cache: None,
         }
     }
 }
@@ -101,6 +105,11 @@ impl ConfigBuilder {
 
     pub fn server_mode(mut self, server_mode: ServerMode) -> Self {
         self.config.server_mode = server_mode;
+        self
+    }
+
+    pub fn cache(mut self, cache: CdnCache) -> Self {
+        self.config.cache = Some(cache);
         self
     }
 

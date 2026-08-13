@@ -6,7 +6,7 @@ pub mod random_access;
 pub mod sequential;
 pub mod web;
 
-pub use cdn::DepotContext;
+pub use cdn::{CdnCache, DepotContext};
 pub use client::CdnDownloader;
 pub use manifest::{ChunkInfo, Manifest, ManifestEntry};
 pub use progress::ProgressCallback;
