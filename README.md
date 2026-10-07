@@ -17,13 +17,14 @@ cargo install --git https://github.com/eva828/SteamVentCdn.git
 steam-vent-cdn <APP_ID> <ITEM_ID>
 
 # Download with authentication
-steam-vent-cdn --username <user> --password <pass> <APP_ID> <ITEM_ID>
+# (password is prompted securely; avoid passing it on the command line)
+steam-vent-cdn --username <user> <APP_ID> <ITEM_ID>
 
 # Specify output directory
 steam-vent-cdn -o ./output <APP_ID> <ITEM_ID>
 
-# List files only (no download)
-steam-vent-cdn --list <APP_ID> <ITEM_ID>
+# List available versions
+steam-vent-cdn --list-versions <APP_ID> <ITEM_ID>
 
 # Increase parallel downloads
 steam-vent-cdn --parallel-download 32 <APP_ID> <ITEM_ID>
