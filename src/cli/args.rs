@@ -76,12 +76,19 @@ pub struct Args {
     )]
     pub output: std::path::PathBuf,
 
-    #[arg(short, long, help = "Steam username for authentication")]
+    #[arg(
+        short,
+        long,
+        env = "STEAM_USERNAME",
+        help = "Steam username for authentication"
+    )]
     pub username: Option<String>,
 
     #[arg(
         short,
         long,
+        env = "STEAM_PASSWORD",
+        hide_env_values = true,
         help = "If a username is provided but the password is omitted, you will be prompted for it."
     )]
     pub password: Option<String>,

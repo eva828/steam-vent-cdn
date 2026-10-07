@@ -20,6 +20,10 @@ steam-vent-cdn <APP_ID> <ITEM_ID>
 # (password is prompted securely; avoid passing it on the command line)
 steam-vent-cdn --username <user> <APP_ID> <ITEM_ID>
 
+# Credentials can also be provided via environment variables
+# (CLI arguments take precedence; without a username the tool connects anonymously)
+STEAM_USERNAME=<user> STEAM_PASSWORD=<pass> steam-vent-cdn <APP_ID> <ITEM_ID>
+
 # Specify output directory
 steam-vent-cdn -o ./output <APP_ID> <ITEM_ID>
 

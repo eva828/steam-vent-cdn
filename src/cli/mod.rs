@@ -109,3 +109,28 @@ pub fn create_config(
         })
         .build()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_credentials;
+    use steam_vent_cdn::config::Credentials;
+
+    #[test]
+    fn anonymous_when_only_password_is_provided() {
+        assert!(matches!(
+            resolve_credentials(None, Some("pass".into())).unwrap(),
+            Credentials::Anonymous
+        ));
+    }
+
+    #[test]
+    fn user_pass_when_both_credentials_are_provided() {
+        match resolve_credentials(Some("user".into()), Some("pass".into())).unwrap() {
+            Credentials::UserPass { username, password } => {
+                assert_eq!(username, "user");
+                assert_eq!(password, "pass");
+            }
+            Credentials::Anonymous => panic!("expected UserPass"),
+        }
+    }
+}
