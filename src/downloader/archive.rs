@@ -287,7 +287,7 @@ impl SteamChunk {
                     })?;
                 }
 
-                let mut hasher = adler::Adler32::from_checksum(0);
+                let mut hasher = adler2::Adler32::from_checksum(0);
                 hasher.write_slice(&decompressed);
                 let actual_crc = hasher.checksum();
                 if actual_crc != expected_crc {
@@ -391,7 +391,7 @@ mod tests {
     }
 
     fn adler32(data: &[u8]) -> u32 {
-        let mut h = adler::Adler32::from_checksum(0);
+        let mut h = adler2::Adler32::from_checksum(0);
         h.write_slice(data);
         h.checksum()
     }
