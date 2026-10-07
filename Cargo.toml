@@ -24,7 +24,7 @@ zip = "2.2.2"
 adler = "1.0.2"
 aes = "0.8.3"
 cbc = "0.1.2"
-steam-vent = { git = "https://codeberg.org/eva828/steam-vent.git", branch = "main" }
+steam-vent = "0.5.0"
 steam-vent-proto = "0.5.2"
 tracing-appender = "0.2.4"
 rpassword = "7.4.0"
