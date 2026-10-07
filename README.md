@@ -4,6 +4,9 @@
 
 Download Steam Workshop items via Steam CDN.
 
+This project is a high-level application built on top of the
+[steam-vent](https://codeberg.org/steam-vent/steam-vent) library.
+
 ## Installation
 
 ```bash
