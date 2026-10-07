@@ -37,6 +37,24 @@ steam-vent-cdn --list-versions <APP_ID> <ITEM_ID>
 steam-vent-cdn --parallel-download 32 <APP_ID> <ITEM_ID>
 ```
 
+## Status
+
+Implemented:
+
+- Workshop item download
+- Anonymous and authenticated sessions, including `STEAM_USERNAME` / `STEAM_PASSWORD`
+
+In progress (branch `feat/app-download`):
+
+- App depot download with platform filtering (`--os`)
+- Per-depot manifest override (`--manifest DEPOT_ID:MANIFEST_ID`)
+- Steam client compatible layout with generated ACF files (`--layout steam`)
+- Shared depot handling (`--shared-depots skip|auto`)
+
+## Notes
+
+This project was developed with the help of AI.
+
 ## License
 
 MIT
