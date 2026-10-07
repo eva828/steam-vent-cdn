@@ -1,3 +1,4 @@
+pub mod app_info;
 pub mod cdn;
 pub mod client;
 pub mod manifest;
@@ -6,6 +7,7 @@ pub mod random_access;
 pub mod sequential;
 pub mod web;
 
+pub use app_info::{AppDepot, AppInfo};
 pub use cdn::{CdnCache, DepotContext};
 pub use client::CdnDownloader;
 pub use manifest::{ChunkInfo, Manifest, ManifestEntry};
@@ -17,3 +19,4 @@ pub use steam_api::{ItemDetails, VersionInfo};
 
 pub(crate) mod archive;
 pub mod steam_api;
+pub mod vdf;

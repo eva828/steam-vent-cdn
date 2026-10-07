@@ -190,6 +190,67 @@ pub enum WorkshopError {
 
     #[error("Multiple workshop items match slug '{0}' ({1} total). Use item ID to disambiguate.")]
     AmbiguousSlug(String, u32),
+
+    #[error("item {0} is delivered as a web file and cannot be installed with the Steam layout")]
+    WebItemNotSupported(u64),
+}
+
+#[derive(Error, Debug)]
+#[non_exhaustive]
+pub enum VdfError {
+    #[error("unexpected end of VDF input at offset {offset}")]
+    UnexpectedEof { offset: usize },
+
+    #[error("unknown VDF type byte {value:#04X} at offset {offset}")]
+    UnknownType { value: u8, offset: usize },
+
+    #[error("invalid UTF-8 in VDF string at offset {offset}")]
+    InvalidUtf8 { offset: usize },
+
+    #[error("invalid UTF-16 in VDF string at offset {offset}")]
+    InvalidUtf16 { offset: usize },
+
+    #[error("trailing data after the VDF document: {remaining} bytes")]
+    TrailingData { remaining: usize },
+
+    #[error("expected a VDF object but found {found}")]
+    ExpectedObject { found: &'static str },
+
+    #[error("missing VDF key '{path}'")]
+    MissingKey { path: &'static str },
+}
+
+#[derive(Error, Debug)]
+#[non_exhaustive]
+pub enum AppError {
+    #[error("PICS returned no app info for app {0}")]
+    UnknownAppId(u32),
+
+    #[error("PICS app info for app {0} is empty")]
+    EmptyAppInfo(u32),
+
+    #[error("PICS response for app {0} is still pending")]
+    ResponsePending(u32),
+
+    #[error("app {0} requires an access token; log in with an account that owns it")]
+    AccessTokenRequired(u32),
+
+    #[error("app {0} has no build id for the public branch")]
+    NoPublicBuild(u32),
+
+    #[error("app {0} has no usable depots")]
+    NoDepots(u32),
+
+    #[error("app {0} has no install directory (config.installdir) required for the Steam layout")]
+    MissingInstallDir(u32),
+
+    #[error(
+        "app {app_id} has no depot {depot_id} (--manifest override does not match any known depot)"
+    )]
+    UnknownDepot { app_id: u32, depot_id: u32 },
+
+    #[error("duplicate --manifest override for depot {0}")]
+    DuplicateManifestOverride(u32),
 }
 
 #[derive(Error, Debug)]
@@ -218,6 +279,12 @@ pub enum SteamVentError {
 
     #[error("Workshop error")]
     Workshop(#[from] WorkshopError),
+
+    #[error("VDF parse error")]
+    Vdf(#[from] VdfError),
+
+    #[error("App info error")]
+    AppInfo(#[from] AppError),
 
     #[error("IO error")]
     Io(#[from] std::io::Error),

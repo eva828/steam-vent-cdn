@@ -3,7 +3,7 @@
 //! This bypasses the Workshop item details lookup.
 //!
 //! Usage:
-//!     cargo run --example download_manifest_by_id -- <APP_ID> <MANIFEST_ID>
+//!     cargo run --example download_manifest_by_id -- <APP_ID> <MANIFEST_ID> [DEPOT_ID]
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -18,13 +18,21 @@ mod common;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() != 3 {
-        eprintln!("Usage: cargo run --example download_manifest_by_id -- <APP_ID> <MANIFEST_ID>");
+    if args.len() < 3 || args.len() > 4 {
+        eprintln!(
+            "Usage: cargo run --example download_manifest_by_id -- <APP_ID> <MANIFEST_ID> [DEPOT_ID]"
+        );
         std::process::exit(1);
     }
 
     let app_id: u32 = args[1].parse()?;
     let manifest_id: u64 = args[2].parse()?;
+    // Workshop manifests use the app ID as the depot ID.
+    let depot_id: u32 = args
+        .get(3)
+        .map(|v| v.parse())
+        .transpose()?
+        .unwrap_or(app_id);
     let output_dir = PathBuf::from("./output");
 
     tracing_subscriber::fmt::init();
@@ -34,7 +42,9 @@ async fn main() -> anyhow::Result<()> {
     let session = client.connect().await?;
     let downloader = CdnDownloader::connect(session).await?;
 
-    let manifest = downloader.fetch_manifest_by_id(manifest_id, app_id).await?;
+    let manifest = downloader
+        .fetch_manifest_by_id(manifest_id, app_id, depot_id)
+        .await?;
 
     println!(
         "Found {} directories and {} files",

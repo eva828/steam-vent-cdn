@@ -67,6 +67,10 @@ name = "download_manifest_by_id"
 path = "examples/download/download_manifest_by_id.rs"
 
 [[example]]
+name = "app_download"
+path = "examples/download/app_download.rs"
+
+[[example]]
 name = "batch_download"
 path = "examples/download/batch_download.rs"
 

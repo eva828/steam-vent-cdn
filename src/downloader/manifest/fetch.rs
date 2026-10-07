@@ -6,10 +6,13 @@ use crate::error::{Result, WorkshopError};
 use std::sync::Arc;
 
 impl CdnDownloader {
-    pub async fn fetch_manifest_by_id(&self, manifest_id: u64, app_id: u32) -> Result<Manifest> {
-        // depot_id equals app_id for all known workshop items.
-        // If a counterexample is found, this needs to become a separate parameter.
-        let depot_id = app_id;
+    /// Fetch and decode a manifest for an explicit app/depot pair.
+    pub async fn fetch_manifest_by_id(
+        &self,
+        manifest_id: u64,
+        app_id: u32,
+        depot_id: u32,
+    ) -> Result<Manifest> {
         tracing::debug!(
             "Using app_id={}, depot_id={}, manifest_id={}",
             app_id,
@@ -87,6 +90,7 @@ impl CdnDownloader {
             .consumer_appid
             .ok_or(WorkshopError::MissingConsumerAppId)?;
 
-        self.fetch_manifest_by_id(manifest_id, app_id).await
+        // Workshop manifests use the consumer app as both app and depot id.
+        self.fetch_manifest_by_id(manifest_id, app_id, app_id).await
     }
 }

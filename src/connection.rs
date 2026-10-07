@@ -63,6 +63,21 @@ impl SteamSession {
     pub fn config(&self) -> &Config {
         &self.config
     }
+
+    /// SteamID64 of the connected session.
+    pub fn steam_id(&self) -> u64 {
+        u64::from(self.connection.steam_id())
+    }
+
+    /// 32 bit account ID of the connected session.
+    pub fn account_id(&self) -> u32 {
+        self.connection.steam_id().account_id()
+    }
+
+    /// Whether the session was established anonymously.
+    pub fn is_anonymous(&self) -> bool {
+        matches!(self.config.credentials, Credentials::Anonymous)
+    }
 }
 
 macro_rules! retry_loop {

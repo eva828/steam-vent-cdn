@@ -4,9 +4,11 @@ pub mod progress;
 pub mod ui;
 mod writer;
 
-pub use args::Args;
+pub use args::{Cli, Command};
 use indicatif::MultiProgress;
-pub use pipeline::{run_download_pipeline, run_list_versions_pipeline};
+pub use pipeline::{
+    SessionIdentity, run_app_download_pipeline, run_download_pipeline, run_list_versions_pipeline,
+};
 use steam_vent_cdn::config::{Config, Credentials, RetryPolicy, ServerMode};
 use steam_vent_cdn::error::Result;
 use tracing_appender::non_blocking::WorkerGuard;

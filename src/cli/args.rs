@@ -1,5 +1,9 @@
+use std::path::PathBuf;
+
 use clap::ArgGroup;
 use clap::Parser;
+use clap::Subcommand;
+use clap::ValueEnum;
 use steam_vent_cdn::config::ServerMode;
 
 #[derive(Debug, Clone)]
@@ -10,6 +14,7 @@ pub enum ItemSpec {
 
 impl std::str::FromStr for ItemSpec {
     type Err = std::convert::Infallible;
+
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         Ok(s.parse::<u64>()
             .map(ItemSpec::Id)
@@ -27,11 +32,114 @@ impl std::fmt::Display for ItemSpec {
 }
 
 #[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Command,
+
+    #[command(flatten)]
+    pub common: CommonArgs,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Command {
+    /// Download a Steam Workshop item
+    Item(ItemArgs),
+    /// Download the depot contents of a Steam app
+    App(AppArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct CommonArgs {
+    #[arg(
+        short,
+        long,
+        global = true,
+        default_value = "./output",
+        help = "The directory where the downloaded files will be saved"
+    )]
+    pub output: PathBuf,
+
+    #[arg(
+        short,
+        long,
+        global = true,
+        env = "STEAM_USERNAME",
+        help = "Steam username for authentication"
+    )]
+    pub username: Option<String>,
+
+    #[arg(
+        short,
+        long,
+        global = true,
+        env = "STEAM_PASSWORD",
+        hide_env_values = true,
+        help = "If a username is provided but the password is omitted, you will be prompted for it."
+    )]
+    pub password: Option<String>,
+
+    #[arg(
+        long,
+        global = true,
+        default_value_t = 16,
+        help = "Parallel download connections"
+    )]
+    pub parallel_download: usize,
+
+    #[arg(
+        long,
+        global = true,
+        value_enum,
+        default_value = "cache-preferred",
+        help = "Server selection mode: cache-preferred(alias: all), cdn, or cache"
+    )]
+    pub server_mode: ServerMode,
+
+    #[arg(short, long, global = true, help = "Enable verbose output")]
+    pub verbose: bool,
+
+    #[arg(
+        long,
+        global = true,
+        value_enum,
+        default_value = "depot",
+        help = "Output layout: depot (one directory per depot) or steam (Steam client compatible)"
+    )]
+    pub layout: Layout,
+
+    #[arg(
+        long,
+        global = true,
+        value_enum,
+        default_value = "skip",
+        help = "How to handle shared depots with --layout steam: skip (print a command) or auto"
+    )]
+    pub shared_depots: SharedDepotsMode,
+}
+
+/// Output directory layout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum, Default)]
+pub enum Layout {
+    /// `output/<APP_ID>/<BUILD_ID>/<DEPOT_ID>/...`
+    #[default]
+    Depot,
+    /// Steam client compatible layout under `steamapps/`.
+    Steam,
+}
+
+/// Handling of depots provided by another app (shared installs).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum, Default)]
+pub enum SharedDepotsMode {
+    /// Do not download shared depots; print the command needed to fetch them.
+    #[default]
+    Skip,
+    /// Resolve and download the owning app automatically.
+    Auto,
+}
+
+#[derive(clap::Args, Debug)]
 #[command(
-    author,
-    version,
-    about,
-    long_about = None,
     group(
         ArgGroup::new("item_spec")
             .args(["item", "item_id", "slug"])
@@ -43,7 +151,7 @@ impl std::fmt::Display for ItemSpec {
             .multiple(false)
     )
 )]
-pub struct Args {
+pub struct ItemArgs {
     #[arg(help = "The ID of the app that the workshop item belongs to")]
     pub app_id: u32,
 
@@ -68,31 +176,6 @@ pub struct Args {
     )]
     pub slug: Option<String>,
 
-    #[arg(
-        short,
-        long,
-        default_value = "./output",
-        help = "The directory where the downloaded files will be saved"
-    )]
-    pub output: std::path::PathBuf,
-
-    #[arg(
-        short,
-        long,
-        env = "STEAM_USERNAME",
-        help = "Steam username for authentication"
-    )]
-    pub username: Option<String>,
-
-    #[arg(
-        short,
-        long,
-        env = "STEAM_PASSWORD",
-        hide_env_values = true,
-        help = "If a username is provided but the password is omitted, you will be prompted for it."
-    )]
-    pub password: Option<String>,
-
     #[arg(long, help = "List all available versions of the workshop item")]
     pub list_versions: bool,
 
@@ -110,18 +193,172 @@ pub struct Args {
         help = "Download specific version by manifest ID"
     )]
     pub manifest_id: Option<u64>,
+}
 
-    #[arg(long, default_value_t = 16, help = "Parallel download connections")]
-    pub parallel_download: usize,
+/// Platform used to filter depots by their `oslist`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum Platform {
+    Windows,
+    Macos,
+    Linux,
+    All,
+}
+
+impl Platform {
+    /// The platform of the running process.
+    pub fn current() -> Self {
+        match std::env::consts::OS {
+            "windows" => Self::Windows,
+            "macos" => Self::Macos,
+            "linux" => Self::Linux,
+            _ => Self::All,
+        }
+    }
+
+    /// The token used in a depot's `oslist`, or `None` when every platform is included.
+    pub fn oslist_name(self) -> Option<&'static str> {
+        match self {
+            Platform::Windows => Some("windows"),
+            Platform::Macos => Some("macos"),
+            Platform::Linux => Some("linux"),
+            Platform::All => None,
+        }
+    }
+}
+
+impl Default for Platform {
+    fn default() -> Self {
+        Self::current()
+    }
+}
+
+/// A `DEPOT_ID:MANIFEST_ID` pair used to override the manifest of a depot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DepotManifest {
+    pub depot_id: u32,
+    pub manifest_id: u64,
+}
+
+impl std::str::FromStr for DepotManifest {
+    type Err = String;
+
+    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+        let (depot, manifest) = value
+            .split_once(':')
+            .ok_or_else(|| format!("expected DEPOT_ID:MANIFEST_ID, got '{value}'"))?;
+        let depot_id = depot
+            .trim()
+            .parse::<u32>()
+            .map_err(|e| format!("invalid depot ID in '{value}': {e}"))?;
+        let manifest_id = manifest
+            .trim()
+            .parse::<u64>()
+            .map_err(|e| format!("invalid manifest ID in '{value}': {e}"))?;
+        Ok(Self {
+            depot_id,
+            manifest_id,
+        })
+    }
+}
+
+#[derive(clap::Args, Debug)]
+pub struct AppArgs {
+    #[arg(help = "The ID of the app to download")]
+    pub app_id: u32,
 
     #[arg(
         long,
         value_enum,
-        default_value = "cache-preferred",
-        help = "Server selection mode: cache-preferred(alias: all), cdn, or cache"
+        help = "Only download depots for this platform (defaults to the current OS)"
     )]
-    pub server_mode: ServerMode,
+    pub os: Option<Platform>,
 
-    #[arg(short, long, help = "Enable verbose output")]
-    pub verbose: bool,
+    #[arg(
+        long = "manifest",
+        value_name = "DEPOT_ID:MANIFEST_ID",
+        help = "Override the manifest of a depot; can be given multiple times. Forces inclusion even when filtered out by --os. Unknown depots are rejected."
+    )]
+    pub manifest: Vec<DepotManifest>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn parses_item_subcommand() {
+        let cli = Cli::try_parse_from(["steam-vent-cdn", "item", "4000", "160250458"]).unwrap();
+        match cli.command {
+            Command::Item(args) => {
+                assert_eq!(args.app_id, 4000);
+                assert!(matches!(args.item, Some(ItemSpec::Id(160250458))));
+            }
+            Command::App(_) => panic!("expected item subcommand"),
+        }
+    }
+
+    #[test]
+    fn parses_app_subcommand_with_global_options() {
+        let cli = Cli::try_parse_from([
+            "steam-vent-cdn",
+            "app",
+            "440",
+            "--os",
+            "linux",
+            "--manifest",
+            "441:123456789",
+            "-o",
+            "/tmp/out",
+        ])
+        .unwrap();
+        assert_eq!(cli.common.output, PathBuf::from("/tmp/out"));
+        match cli.command {
+            Command::App(args) => {
+                assert_eq!(args.app_id, 440);
+                assert_eq!(args.os, Some(Platform::Linux));
+                assert_eq!(
+                    args.manifest,
+                    vec![DepotManifest {
+                        depot_id: 441,
+                        manifest_id: 123456789
+                    }]
+                );
+            }
+            Command::Item(_) => panic!("expected app subcommand"),
+        }
+    }
+
+    #[test]
+    fn rejects_malformed_manifest_override() {
+        assert!("441".parse::<DepotManifest>().is_err());
+        assert!("x:1".parse::<DepotManifest>().is_err());
+        assert!("441:y".parse::<DepotManifest>().is_err());
+    }
+
+    #[test]
+    fn oslist_name_maps_platforms() {
+        assert_eq!(Platform::Linux.oslist_name(), Some("linux"));
+        assert_eq!(Platform::All.oslist_name(), None);
+    }
+
+    #[test]
+    fn parses_layout_and_shared_depot_options() {
+        let cli = Cli::try_parse_from([
+            "steam-vent-cdn",
+            "app",
+            "440",
+            "--layout",
+            "steam",
+            "--shared-depots",
+            "auto",
+        ])
+        .unwrap();
+        assert_eq!(cli.common.layout, Layout::Steam);
+        assert_eq!(cli.common.shared_depots, SharedDepotsMode::Auto);
+
+        let default = Cli::try_parse_from(["steam-vent-cdn", "app", "440"]).unwrap();
+        assert_eq!(default.common.layout, Layout::Depot);
+        assert_eq!(default.common.shared_depots, SharedDepotsMode::Skip);
+    }
 }
