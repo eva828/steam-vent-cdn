@@ -1,7 +1,5 @@
 # SteamVentCdn
 
-[![Rust](https://img.shields.io/badge/rust-2024-orange.svg)](https://www.rust-lang.org)
-
 Download Steam Workshop items via Steam CDN.
 
 This project is a high-level application built on top of the
