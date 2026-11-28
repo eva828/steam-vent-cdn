@@ -2,10 +2,10 @@ mod cli;
 
 use clap::Parser;
 use cli::Command;
-use cli::args::{ItemArgs, ItemSpec};
+use cli::args::{ItemArgs, ItemSpec, Platform};
 use steam_vent_cdn::connection::SteamClient;
 use steam_vent_cdn::downloader::client::CdnDownloader;
-use steam_vent_cdn::error::{Result, WorkshopError};
+use steam_vent_cdn::error::{AppError, Result, WorkshopError};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -68,16 +68,20 @@ async fn main() -> Result<()> {
             }
         }
         Command::App(args) => {
-            let platform = args.os.unwrap_or_default();
+            let platform = args
+                .os
+                .or_else(Platform::detect)
+                .ok_or(AppError::UnsupportedHostOs(std::env::consts::OS))?;
             cli::run_app_download_pipeline(
                 &downloader,
                 &multi,
                 args.app_id,
                 common.output.clone(),
                 platform,
+                args.language.as_filter(),
                 &args.manifest,
                 common.layout,
-                common.shared_depots,
+                args.shared_depots,
                 &identity,
             )
             .await?;

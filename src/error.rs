@@ -131,6 +131,9 @@ pub enum ManifestError {
 
     #[error("Missing field in manifest: {0}")]
     MissingField(&'static str),
+
+    #[error("'{name}' is absolute or escapes the output directory")]
+    UnsafePath { name: String },
 }
 
 // EResult values: https://steamerrors.com/
@@ -218,6 +221,9 @@ pub enum VdfError {
 
     #[error("missing VDF key '{path}'")]
     MissingKey { path: &'static str },
+
+    #[error("VDF document nests deeper than {limit} levels")]
+    NestingTooDeep { limit: usize },
 }
 
 #[derive(Error, Debug)]
@@ -229,8 +235,8 @@ pub enum AppError {
     #[error("PICS app info for app {0} is empty")]
     EmptyAppInfo(u32),
 
-    #[error("PICS response for app {0} is still pending")]
-    ResponsePending(u32),
+    #[error("unsupported host OS '{0}'; pass --os windows|macos|linux|all")]
+    UnsupportedHostOs(&'static str),
 
     #[error("app {0} requires an access token; log in with an account that owns it")]
     AccessTokenRequired(u32),
@@ -241,8 +247,20 @@ pub enum AppError {
     #[error("app {0} has no usable depots")]
     NoDepots(u32),
 
+    #[error("app {0} has no depots matching the selected platform and language")]
+    NoDepotsForSelection(u32),
+
     #[error("app {0} has no install directory (config.installdir) required for the Steam layout")]
     MissingInstallDir(u32),
+
+    #[error("app {app_id} has an unsafe install directory '{name}'")]
+    UnsafeInstallDir { app_id: u32, name: String },
+
+    #[error("app {app_id} does not provide shared depot {depot_id} (not installed or not public)")]
+    SharedDepotUnavailable { app_id: u32, depot_id: u32 },
+
+    #[error("resolving shared depots exceeded {0} levels; check for a cyclic dependency")]
+    SharedDepotDepth(u32),
 
     #[error(
         "app {app_id} has no depot {depot_id} (--manifest override does not match any known depot)"

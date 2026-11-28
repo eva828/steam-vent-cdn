@@ -126,6 +126,9 @@ impl RawManifest {
                 .take()
                 .ok_or(ManifestError::MissingField("mapping.filename"))?;
             let filename = filename.replace('\\', "/");
+            if !crate::path_safety::is_relative(&filename) {
+                return Err(ManifestError::UnsafePath { name: filename }.into());
+            }
             let chunks: Vec<ChunkInfo> = mapping
                 .chunks
                 .into_iter()
@@ -287,6 +290,19 @@ mod tests {
         raw.payload.mappings[0].filename = None;
 
         assert!(raw.into_entries(make_empty_depot()).is_err());
+    }
+
+    #[test]
+    fn into_entries_rejects_paths_outside_the_output_dir() {
+        let payload_data = make_payload_with_files(&[("../../etc/passwd", 10)]);
+        let payload_seg = make_segment(MAGIC_PAYLOAD, &payload_data);
+        let zip = make_manifest_zip(&[&payload_seg]);
+
+        let raw = RawManifest::decode(&zip).unwrap();
+        assert!(matches!(
+            raw.into_entries(make_empty_depot()),
+            Err(SteamVentError::Manifest(ManifestError::UnsafePath { .. }))
+        ));
     }
 
     #[test]

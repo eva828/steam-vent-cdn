@@ -151,7 +151,7 @@ pub fn parse_binary(bytes: &[u8]) -> Result<Vdf> {
     }
 
     let key = parser.read_cstring()?;
-    let value = parser.read_value(type_byte)?;
+    let value = parser.read_value(type_byte, 0)?;
 
     if parser.pos != bytes.len() {
         return Err(VdfError::TrailingData {
@@ -166,6 +166,17 @@ pub fn parse_binary(bytes: &[u8]) -> Result<Vdf> {
 struct Parser<'a> {
     data: &'a [u8],
     pos: usize,
+}
+
+/// Maximum nesting accepted by both parsers, so a hostile document cannot
+/// exhaust the stack.
+const MAX_DEPTH: usize = 64;
+
+fn check_depth(depth: usize) -> Result<()> {
+    if depth > MAX_DEPTH {
+        return Err(VdfError::NestingTooDeep { limit: MAX_DEPTH }.into());
+    }
+    Ok(())
 }
 
 impl<'a> Parser<'a> {
@@ -223,9 +234,9 @@ impl<'a> Parser<'a> {
         String::from_utf16(&units).map_err(|_| VdfError::InvalidUtf16 { offset: start }.into())
     }
 
-    fn read_value(&mut self, type_byte: u8) -> Result<VdfValue> {
+    fn read_value(&mut self, type_byte: u8, depth: usize) -> Result<VdfValue> {
         match type_byte {
-            TYPE_OBJECT => Ok(VdfValue::Object(self.read_object()?)),
+            TYPE_OBJECT => Ok(VdfValue::Object(self.read_object(depth)?)),
             TYPE_STRING => Ok(VdfValue::String(self.read_cstring()?)),
             TYPE_INT32 => {
                 let bytes = self.read_exact(4)?;
@@ -264,7 +275,8 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn read_object(&mut self) -> Result<VdfObject> {
+    fn read_object(&mut self, depth: usize) -> Result<VdfObject> {
+        check_depth(depth)?;
         let mut entries = Vec::new();
         loop {
             let type_byte = self.read_u8()?;
@@ -272,7 +284,7 @@ impl<'a> Parser<'a> {
                 break;
             }
             let key = self.read_cstring()?;
-            let value = self.read_value(type_byte)?;
+            let value = self.read_value(type_byte, depth + 1)?;
             entries.push((key, value));
         }
         Ok(VdfObject { entries })
@@ -290,7 +302,7 @@ pub fn parse_text(bytes: &[u8]) -> Result<Vdf> {
     let mut parser = TextParser::new(input);
     parser.skip_ws_and_comments();
     let key = parser.parse_key()?;
-    let value = parser.parse_value()?;
+    let value = parser.parse_value(0)?;
     parser.skip_ws_and_comments();
     // Some PICS buffers are NUL terminated.
     while parser.peek() == Some('\0') {
@@ -418,6 +430,10 @@ impl<'a> TextParser<'a> {
                             self.pos += 1;
                         }
                         Some(other) => {
+                            // Keep the backslash: Steam's parser preserves unknown
+                            // escapes, and dropping it corrupts merged ACF values
+                            // such as Windows paths.
+                            out.push('\\');
                             out.push(other);
                             self.pos += other.len_utf8();
                         }
@@ -431,17 +447,18 @@ impl<'a> TextParser<'a> {
         }
     }
 
-    fn parse_value(&mut self) -> Result<VdfValue> {
+    fn parse_value(&mut self, depth: usize) -> Result<VdfValue> {
         self.skip_ws_and_comments();
         if self.peek() == Some('{') {
             self.pos += 1;
-            Ok(VdfValue::Object(self.parse_object()?))
+            Ok(VdfValue::Object(self.parse_object(depth)?))
         } else {
             Ok(VdfValue::String(self.parse_key()?))
         }
     }
 
-    fn parse_object(&mut self) -> Result<VdfObject> {
+    fn parse_object(&mut self, depth: usize) -> Result<VdfObject> {
+        check_depth(depth)?;
         let mut entries = Vec::new();
 
         loop {
@@ -456,7 +473,7 @@ impl<'a> TextParser<'a> {
             }
 
             let key = self.parse_key()?;
-            let value = self.parse_value()?;
+            let value = self.parse_value(depth + 1)?;
             entries.push((key, value));
         }
 
@@ -483,21 +500,6 @@ impl VdfObject {
             None => self.entries.push((key, value)),
         }
     }
-
-    pub fn get_mut(&mut self, key: &str) -> Option<&mut VdfValue> {
-        self.entries
-            .iter_mut()
-            .find(|(existing, _)| existing == key)
-            .map(|(_, value)| value)
-    }
-
-    pub fn remove(&mut self, key: &str) -> Option<VdfValue> {
-        let index = self
-            .entries
-            .iter()
-            .position(|(existing, _)| existing == key)?;
-        Some(self.entries.remove(index).1)
-    }
 }
 
 impl VdfValue {
@@ -511,13 +513,6 @@ impl VdfValue {
 
     pub fn object(entries: Vec<(String, VdfValue)>) -> Self {
         VdfValue::Object(VdfObject { entries })
-    }
-
-    pub fn as_object_mut(&mut self) -> Option<&mut VdfObject> {
-        match self {
-            VdfValue::Object(value) => Some(value),
-            _ => None,
-        }
     }
 
     fn as_text(&self) -> String {
@@ -827,7 +822,41 @@ mod tests {
         object.insert("k", VdfValue::string("2"));
         assert_eq!(object.len(), 1);
         assert_eq!(object.get("k").unwrap().as_str(), Some("2"));
-        object.remove("k");
-        assert!(object.is_empty());
+    }
+
+    #[test]
+    fn preserves_unknown_escapes() {
+        let text = r#""root" { "path" "C:\Games\Game" }"#;
+        let vdf = parse_text(text.as_bytes()).unwrap();
+        assert_eq!(
+            vdf.get_path(&["path"]).unwrap().as_str(),
+            Some(r"C:\Games\Game")
+        );
+
+        let serialized = to_text(&vdf);
+        let reparsed = parse_text(serialized.as_bytes()).unwrap();
+        assert_eq!(
+            reparsed.get_path(&["path"]).unwrap().as_str(),
+            Some(r"C:\Games\Game")
+        );
+    }
+
+    #[test]
+    fn rejects_documents_nested_too_deep() {
+        let depth = MAX_DEPTH + 2;
+        let mut text = String::new();
+        for index in 0..depth {
+            text.push_str(&format!("\"k{index}\" {{ "));
+        }
+        for _ in 0..depth {
+            text.push('}');
+        }
+
+        assert!(matches!(
+            parse_text(text.as_bytes()),
+            Err(crate::error::SteamVentError::Vdf(
+                VdfError::NestingTooDeep { .. }
+            ))
+        ));
     }
 }

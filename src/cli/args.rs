@@ -107,15 +107,6 @@ pub struct CommonArgs {
         help = "Output layout: depot (one directory per depot) or steam (Steam client compatible)"
     )]
     pub layout: Layout,
-
-    #[arg(
-        long,
-        global = true,
-        value_enum,
-        default_value = "skip",
-        help = "How to handle shared depots with --layout steam: skip (print a command) or auto"
-    )]
-    pub shared_depots: SharedDepotsMode,
 }
 
 /// Output directory layout.
@@ -205,13 +196,14 @@ pub enum Platform {
 }
 
 impl Platform {
-    /// The platform of the running process.
-    pub fn current() -> Self {
+    /// The platform of the running process, or `None` when it is not one of the
+    /// platforms Steam serves depots for.
+    pub fn detect() -> Option<Self> {
         match std::env::consts::OS {
-            "windows" => Self::Windows,
-            "macos" => Self::Macos,
-            "linux" => Self::Linux,
-            _ => Self::All,
+            "windows" => Some(Self::Windows),
+            "macos" => Some(Self::Macos),
+            "linux" => Some(Self::Linux),
+            _ => None,
         }
     }
 
@@ -226,9 +218,43 @@ impl Platform {
     }
 }
 
-impl Default for Platform {
+/// Language used to pick localized depots.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Language {
+    /// Include every language.
+    All,
+    One(String),
+}
+
+impl Language {
+    /// The language to filter with, or `None` when every language is included.
+    pub fn as_filter(&self) -> Option<&str> {
+        match self {
+            Self::All => None,
+            Self::One(language) => Some(language),
+        }
+    }
+}
+
+impl Default for Language {
     fn default() -> Self {
-        Self::current()
+        Self::One("english".to_string())
+    }
+}
+
+impl std::str::FromStr for Language {
+    type Err = String;
+
+    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+        let value = value.trim();
+        if value.is_empty() {
+            return Err("expected a language name or 'all'".to_string());
+        }
+        if value.eq_ignore_ascii_case("all") {
+            Ok(Self::All)
+        } else {
+            Ok(Self::One(value.to_ascii_lowercase()))
+        }
     }
 }
 
@@ -274,11 +300,27 @@ pub struct AppArgs {
     pub os: Option<Platform>,
 
     #[arg(
+        long,
+        default_value = "english",
+        value_name = "LANGUAGE",
+        help = "Download depots for this language; depots without a language are always included. Use 'all' for every language"
+    )]
+    pub language: Language,
+
+    #[arg(
         long = "manifest",
         value_name = "DEPOT_ID:MANIFEST_ID",
-        help = "Override the manifest of a depot; can be given multiple times. Forces inclusion even when filtered out by --os. Unknown depots are rejected."
+        help = "Override the manifest of a depot; can be given multiple times. Forces inclusion even when filtered out by --os or --language. Unknown depots are rejected."
     )]
     pub manifest: Vec<DepotManifest>,
+
+    #[arg(
+        long,
+        value_enum,
+        default_value = "skip",
+        help = "How to handle depots provided by another app with --layout steam: skip (print a command) or auto"
+    )]
+    pub shared_depots: SharedDepotsMode,
 }
 
 #[cfg(test)]
@@ -355,10 +397,56 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(cli.common.layout, Layout::Steam);
-        assert_eq!(cli.common.shared_depots, SharedDepotsMode::Auto);
+        match cli.command {
+            Command::App(args) => assert_eq!(args.shared_depots, SharedDepotsMode::Auto),
+            Command::Item(_) => panic!("expected app subcommand"),
+        }
 
         let default = Cli::try_parse_from(["steam-vent-cdn", "app", "440"]).unwrap();
         assert_eq!(default.common.layout, Layout::Depot);
-        assert_eq!(default.common.shared_depots, SharedDepotsMode::Skip);
+        match default.command {
+            Command::App(args) => {
+                assert_eq!(args.shared_depots, SharedDepotsMode::Skip);
+                assert_eq!(args.language, Language::One("english".to_string()));
+            }
+            Command::Item(_) => panic!("expected app subcommand"),
+        }
+    }
+
+    #[test]
+    fn shared_depots_is_only_accepted_by_app() {
+        assert!(
+            Cli::try_parse_from([
+                "steam-vent-cdn",
+                "item",
+                "4000",
+                "1",
+                "--shared-depots",
+                "auto"
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn parses_language_option() {
+        assert_eq!("all".parse::<Language>().unwrap().as_filter(), None);
+        assert_eq!(
+            "French".parse::<Language>().unwrap().as_filter(),
+            Some("french")
+        );
+        assert!("".parse::<Language>().is_err());
+        assert!("   ".parse::<Language>().is_err());
+    }
+
+    #[test]
+    fn detect_maps_the_host_os() {
+        let expected = match std::env::consts::OS {
+            "windows" => Some(Platform::Windows),
+            "macos" => Some(Platform::Macos),
+            "linux" => Some(Platform::Linux),
+            _ => None,
+        };
+        assert_eq!(Platform::detect(), expected);
     }
 }

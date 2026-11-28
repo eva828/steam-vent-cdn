@@ -101,7 +101,7 @@ macro_rules! retry_loop {
     }};
 }
 
-fn is_transient(err: &steam_vent::NetworkError) -> bool {
+pub(crate) fn is_transient(err: &steam_vent::NetworkError) -> bool {
     use steam_vent::EResult;
     use steam_vent::NetworkError;
     matches!(

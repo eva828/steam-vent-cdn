@@ -34,19 +34,18 @@ async fn main() -> anyhow::Result<()> {
     let info = downloader.fetch_app_info(app_id).await?;
     println!("App '{}' (build {})", info.name, info.build_id);
 
-    // Same mapping as `Platform::current().oslist_name()` in the CLI:
-    // unknown hosts download every depot instead of filtering everything out.
+    // The CLI resolves the same platform from `--os` or the host OS.
     let os = match std::env::consts::OS {
         "windows" => Some("windows"),
         "macos" => Some("macos"),
         "linux" => Some("linux"),
-        _ => None,
+        other => anyhow::bail!("unsupported host OS '{other}'; use the CLI with --os"),
     };
     let base = output_dir
         .join(app_id.to_string())
         .join(info.build_id.to_string());
 
-    for depot in info.depots_for_os(os) {
+    for depot in info.selected_depots(os, Some("english")) {
         if let Some(owner) = depot.depot_from_app {
             println!(
                 "Skipping shared depot {} (provided by app {})",

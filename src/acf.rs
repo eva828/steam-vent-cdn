@@ -11,6 +11,8 @@ use crate::error::{Result, SteamVentError};
 
 /// `StateFlags` value Steam uses for a fully installed app.
 const STATE_FLAGS_FULLY_INSTALLED: u32 = 4;
+/// `StateFlags` value Steam uses while content is still missing.
+const STATE_FLAGS_UPDATE_REQUIRED: u32 = 2;
 const UNIVERSE_PUBLIC: u32 = 1;
 const DEFAULT_LANGUAGE: &str = "english";
 
@@ -41,6 +43,8 @@ pub struct AppManifest {
     pub installed_depots: Vec<InstalledDepot>,
     /// Shared depots as `(depot_id, owner_app_id)`.
     pub shared_depots: Vec<(u32, u32)>,
+    /// Whether every depot the app needs is installed (shared depots included).
+    pub complete: bool,
 }
 
 impl AppManifest {
@@ -49,13 +53,21 @@ impl AppManifest {
             Some(root) => root,
             None => VdfObject::new(),
         };
+        warn_stale_depots(&root, &self.installed_depots, path);
 
         root.insert("appid", VdfValue::string(self.app_id.to_string()));
         root.insert("Universe", VdfValue::string(UNIVERSE_PUBLIC.to_string()));
         root.insert("name", VdfValue::string(self.name.clone()));
         root.insert(
             "StateFlags",
-            VdfValue::string(STATE_FLAGS_FULLY_INSTALLED.to_string()),
+            VdfValue::string(
+                if self.complete {
+                    STATE_FLAGS_FULLY_INSTALLED
+                } else {
+                    STATE_FLAGS_UPDATE_REQUIRED
+                }
+                .to_string(),
+            ),
         );
         root.insert("installdir", VdfValue::string(self.installdir.clone()));
         root.insert(
@@ -245,6 +257,35 @@ fn merge_object(root: &mut VdfObject, key: &str, entries: Vec<(String, VdfValue)
     root.insert(key, VdfValue::Object(object));
 }
 
+/// Report depots that a previous run recorded but this run did not download.
+///
+/// The manifest is merged instead of replaced so that installs of several
+/// platforms can coexist; the warning keeps the stale entries visible.
+fn warn_stale_depots(root: &VdfObject, installed: &[InstalledDepot], path: &Path) {
+    let Some(existing) = root.get("InstalledDepots").and_then(VdfValue::as_object) else {
+        return;
+    };
+
+    let stale: Vec<&str> = existing
+        .iter()
+        .map(|(key, _)| key)
+        .filter(|key| {
+            !installed
+                .iter()
+                .any(|depot| depot.depot_id.to_string() == *key)
+        })
+        .collect();
+
+    if !stale.is_empty() {
+        tracing::warn!(
+            "Keeping {} depot(s) recorded by a previous run in {}: {}",
+            stale.len(),
+            path.display(),
+            stale.join(", ")
+        );
+    }
+}
+
 fn installed_depots_size(root: &VdfObject) -> u64 {
     root.get("InstalledDepots")
         .and_then(VdfValue::as_object)
@@ -312,6 +353,7 @@ mod tests {
                 dlc_app_id: None,
             }],
             shared_depots: vec![],
+            complete: true,
         }
     }
 
@@ -448,6 +490,24 @@ mod tests {
         let document = parse(text.as_bytes()).unwrap();
         assert_eq!(document.key, "AppState");
         assert_eq!(document.get_path(&["appid"]).unwrap().as_u64(), Some(480));
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
+    async fn writes_update_required_for_incomplete_installs() {
+        let path = temp_path("incomplete.acf");
+        let _ = tokio::fs::remove_file(&path).await;
+
+        let mut app = sample_app();
+        app.complete = false;
+        app.write(&path).await.unwrap();
+
+        let text = tokio::fs::read_to_string(&path).await.unwrap();
+        let document = parse(text.as_bytes()).unwrap();
+        assert_eq!(
+            document.get_path(&["StateFlags"]).unwrap().as_u64(),
+            Some(2)
+        );
         let _ = tokio::fs::remove_file(&path).await;
     }
 

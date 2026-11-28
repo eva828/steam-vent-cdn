@@ -37,6 +37,9 @@ steam-vent-cdn item <APP_ID> <ITEM_ID> --list-versions
 # Download depots for a specific platform (defaults to the current OS)
 steam-vent-cdn app <APP_ID> --os windows
 
+# Download depots for a specific language (default: english; 'all' keeps every one)
+steam-vent-cdn app <APP_ID> --language japanese
+
 # Pin a depot to a specific manifest (can be given multiple times)
 steam-vent-cdn app <APP_ID> --manifest <DEPOT_ID>:<MANIFEST_ID>
 
@@ -57,22 +60,38 @@ The default `--layout depot` keeps one directory per depot:
 - Workshop: `output/steamapps/workshop/content/<APP_ID>/<ITEM_ID>/` with
   `output/steamapps/workshop/appworkshop_<APP_ID>.acf`
 
-When several depots provide the same path they are merged in mount order, so the
-later depot wins (as Steam does); a warning is logged.
+Depots are overlaid in the order they appear in the app's PICS appinfo, so the
+later depot wins when two of them provide the same path; a summary of those
+overlaps is logged after each app. Depots without a `language` are always
+installed, depots of other languages and low violence builds are skipped
+(unless a `--manifest` override asks for them).
+
+`item --layout steam` only writes `appworkshop_<APP_ID>.acf`; the app itself has
+to be installed with `app` (`appmanifest_<APP_ID>.acf`) before Steam mounts the
+workshop content.
 
 ### Shared depots
 
 Some depots are provided by another app (for example the Steamworks Common
 Redistributables). They are not downloaded by default; the command needed to
-install them is printed instead. Pass `--shared-depots auto` to resolve and
-download the owning app automatically (this can be significantly larger).
+install them is printed instead. Pass `--shared-depots auto` to resolve the
+owning app and download the linked depots from it.
+Shared depots are recorded in the app manifest's `SharedDepots` either way, and
+the manifest is marked as requiring an update while they are missing.
+
+## Breaking changes
+
+- The Workshop download is now the `item` subcommand: `steam-vent-cdn <APP_ID>
+  <ITEM_ID>` becomes `steam-vent-cdn item <APP_ID> <ITEM_ID>`.
+- `--layout` is available for both subcommands; `--os`, `--language`,
+  `--manifest` and `--shared-depots` belong to `app`.
 
 ## Status
 
 Implemented:
 
 - Workshop item download (depot layout and Steam layout)
-- App depot download with platform filtering (`--os`)
+- App depot download with platform and language filtering (`--os`, `--language`)
 - Per-depot manifest override (`--manifest DEPOT_ID:MANIFEST_ID`)
 - Anonymous and authenticated sessions, including `STEAM_USERNAME` / `STEAM_PASSWORD`
 - Steam client compatible layout with generated ACF files (`--layout steam`)
